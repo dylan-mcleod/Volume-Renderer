@@ -59,7 +59,7 @@ public:
     }
 };
 
-
+struct Texture_SDL;
 
 class Window_SDL {
     SDL_Window *window;
@@ -71,18 +71,14 @@ public:
     glm::ivec2 size;
 
     void create(glm::ivec2 size);
-    void drawTexture();
-};
-
-// todo: this
-struct Pixel_8888 {
-
+    void drawTexture(Texture_SDL * tex, glm::ivec2 _pos = glm::ivec2(0), glm::ivec2 _size = glm::ivec2(-1));
+	void clear();
 };
 
 // wrapper around SDL_Texture
 struct Texture_SDL {
     SDL_Texture *_texture;
-    Pixel_8888 *data_stream; // This is write-only data that should only be written to between lock-unlock calls (mutexes?)
+    glm::u8vec4 *data_stream; // This is write-only data that should only be written to between lock-unlock calls (mutexes?)
     int pitch;
     glm::ivec2 size;
 
@@ -91,7 +87,7 @@ struct Texture_SDL {
         SDL_LockTexture(_texture, NULL, (void**) &data_stream, &pitch);
     }
 
-    void streamData() {
+    void unlock() {
         SDL_UnlockTexture(_texture);
     }
     
@@ -108,19 +104,42 @@ void Window_SDL::create(glm::ivec2 size) {
     Handle_Error_SDL(SDL_CreateWindowAndRenderer(size.x, size.y, SDL_WINDOW_RESIZABLE, &window, &renderer));
 }
 
+void Window_SDL::drawTexture(Texture_SDL * tex, glm::ivec2 _pos, glm::ivec2 _size) {
+	if(_size.x < 0) _size.x = this->size.x;
+	if(_size.y < 0) _size.y = this->size.y;
+	
+	SDL_Rect texture_rect;
+	texture_rect.x = _pos.x;
+	texture_rect.y = _pos.y;
+	texture_rect.w = _size.x;
+	texture_rect.h = _size.y;
+	
+	SDL_RenderCopy(renderer, tex->_texture, NULL, texture_rect);
+}
+
+void Window_SDL::clear() {
+	SDL_RenderClear(renderer);
+}
+
 bool raycast_naiive(glm::vec3 start, glm::vec3 direction, float maxLen, VolumeStore* volume) {
     glm::vec3 lineFitLength;
     glm::vec3 cur = start;
 
     int numIters = maxLen; // todo: compute this
+	
+	glm::vec3 directSign = glm::sign(direction);
+	glm::vec3 heaviside  = glm::round((directSign + 1.f) / 2.f);
 
     // abritrarily small constant, don't read into it
-    glm::vec3 fiveepsilon = glm::vec3(5);//*glm::epsilon<float>;
-
+    float eps = 5.f * std::numeric_limits<float>::epsilon;
+	glm::vec3 directSignEpsilon = directSign*eps;
+	
+	
     for(int i = 0; i < numIters; i++) {
-        glm::vec3 distToNextGrid = glm::ceil(cur+fiveepsilon)-cur;
+		glm::vec3 curPlusEpsilon = cur+directSignEpsilon;    // Ensure that things on a boundary will be rounded to the correct position.
+		glm::vec3 distToNextGrid = curPlusEpsilon+heaviside; // If it's negative, we keep the floor. If not, we change this into a ceil.
         glm::vec3 normalizedDist = distToNextGrid/direction;
-        // Find horizontal minimum... This could kill our performance on non-batched SIMD operations... 
+        // Find horizontal minimum. This could potentially kill our performance on SIMD operations... 
         float minDistN = fmin(fmin(normalizedDist.x,normalizedDist.y),normalizedDist.z);
         cur += (minDistN * direction);
 
@@ -139,9 +158,9 @@ struct Voxel {
     static Voxel fromNormalizedFloats(float R, float G, float B, float A = 1.f) { 
          return Voxel(
             (uint8_t)floor(R*255.f), 
-            (uint8_t)floor(R*255.f), 
-            (uint8_t)floor(R*255.f), 
-            (uint8_t)floor(R*255.f)
+            (uint8_t)floor(G*255.f), 
+            (uint8_t)floor(B*255.f), 
+            (uint8_t)floor(A*255.f)
         ); 
     }
 
@@ -149,7 +168,9 @@ struct Voxel {
     Voxel(): rgba(0) {}
 };
 
-Window_SDL *window;
+Window_SDL  *window;
+Texture_SDL *screenTex;
+VolumeStore *myVol;
 
 void raycastOntoScreen() {
 
@@ -163,35 +184,119 @@ void raycastOntoScreen() {
     glm::mat4 view = glm::lookAt(camPos, lookAt, up);
 
     float FOV = 45.0 * M_PI / 180.0; // this is in radians, to make everyone's lives easier.
-    glm::mat4 projection = glm::perspective(FOV, (float)window->size.x / window->size.y, 0.1f, 10000.f);
+	
+	
+	// This should hopefully set the ray end to be at the screen, and we set the start to be at the camera. However, this probably doesn't matter.
+	float z = tan(FOV/2);
+	
+    glm::mat4 projection = glm::perspective(FOV, (float)window->size.x / window->size.y, z, 10000.f);
+	
+	
+	glm::mat4 VP = projection * view;
+	glm::mat4 iVP = glm::inverse(VP);
 
 
 
+	glm::vec4 topleft    (-1,-1,0,1);
+	glm::vec4 topright   (-1, 1,0,1);
+	glm::vec4 bottomleft ( 1,-1,0,1);
+	glm::vec4 bottomright( 1, 1,0,1);
+	
+
+	topleft = iVP * topleft;
+	topright = iVP * bottomright;
+	bottomleft = iVP * topleft;
+	bottomright = iVP * bottomright;
+	
+	topleft     /= topleft.w;
+	topright    /= topright.w;
+	bottomleft  /= bottomleft.w;
+	bottomright /= bottomright.w;
+
+	glm::vec3 xdiff(topright-topleft);
+	xdiff /= window->size.x;
+	glm::vec3 ydiff(bottomleft-topleft);
+	ydiff /= window->size.y;
+
+	glm::vec3 curYLoop(topleft-camPos);
 
 
-
-
-
-
-/*
-    for(pixel.y = 0; pixel.y < window.size.y; ++pixel.y) {
-
-        for(pixel.x = 0; pixel.x < window.size.x; ++pixel.x) {
+	glm::ivec2 pixel(0,0);
+    for(pixel.y = 0; pixel.y < window->size.y; ++pixel.y) {
+	
+		glm::vec3 curXLoop(curYLoop);
+        for(pixel.x = 0; pixel.x < window->size.x; ++pixel.x) {
             
-
+			if(raycast_naiive(camPos, glm::normalize(curXloop), 100.f, myVol) {
+				screenTex->data_stream[pixel.x + pixel.y*window->size.x] = glm::u8vec4(255,255,255,255);
+			} else {
+				screenTex->data_stream[pixel.x + pixel.y*window->size.x] = glm::u8vec4(0,0,0,255);
+			}
+			curXLoop += xdiff;
         }
-    }*/
+		curYLoop += ydiff;
+    }
     
 
 
 
 }
 
+struct KeyHandler {
+	
+	std::map<SDL_Scancode, bool> keysDown;
+	
+	bool getIfKeyDown(SDL_Scancode scan) {
+		return keysDown[scan];
+	}
+	
+	/** state is either down (true) or up (false) */
+	void setKeyState(SDL_Scancode scan, bool state=true) {
+		keysDown[scan] = state;
+	}
+	
+	
+};
+
+KeyHandler keys;
+
 
 int main(int argc, char* argv[]) {
     window = new Window_SDL();
     window->create(glm::ivec2(800,600));
 
-    VolumeStore* myVol = new VolumeStore({0,0,0}, {50,50,50});
+    myVol = new VolumeStore({0,0,0}, {50,50,50});
+	
+	bool running = true;
+	while(running) {
+		raycastOntoScreen();
+		window->clear();
+		window->drawTexture(screenTex);
+		
+		
+		
+		
+		SDL_Event event;
+		while(SDL_PollEvent(&event)) {
+			switch (event.type) {
+				
+			case SDL_QUIT:
+				running = false;
+				break;
+				
+			case SDL_KEYDOWN:
+				keys.setKeyState(event.keysym.scancode, true);
+				break;
+				
+			case SDL_KEYUP:
+				keys.setKeyState(event.keysym.scancode, false);
+				break;
+			
+			}
+		}
+		
+		running = !keys.getIfKeyDown(SDL_SCANCODE_ESCAPE); // can exit program using escape key
+	}
+	
     return 0;
 }
