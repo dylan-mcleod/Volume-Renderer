@@ -1,15 +1,16 @@
 #define _USE_MATH_DEFINES
+//#define GLM_FORCE_AVX // or GLM_FORCE_SSE2 if your processor doesn't support it
+#define GLM_FORCE_ALIGNED
 #include <iostream>
 #include <fstream>
 #include <SDL2/SDL.h>
 #include <glm/glm.hpp>
-#include <glm/gtx/simd_vec4.hpp>
-#include <glm/gtx/simd_mat4.hpp>
+//#include <glm/gtx/simd_vec4.hpp>
+//#include <glm/gtx/simd_mat4.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <map>
-
 // This is temporary, please don't yell at me
 #include "volume.cpp"
 
@@ -25,8 +26,6 @@ class Window_SDL {
 public:
     SDL_Window *window;
     SDL_Renderer *renderer;
-
-
 
     glm::ivec2 size;
 
@@ -127,9 +126,59 @@ RaycastReport<Voxel> raycast_naiive(glm::vec3 start, glm::vec3 direction, float 
                 Voxel vox = volume->sample(roundedPos);
                 if(vox.rgba.a > 0) {
                     //std::cout << "a" << std::endl;
-                    return RaycastReport<Voxel>{true, cur, vox};
+                    return RaycastReport<Voxel>{true, glm::vec3(cur), vox};
                 }
             }
+    }
+    return RaycastReport<Voxel>{};
+}
+
+RaycastReport<Voxel> raycast_naiive_vec4(glm::vec4 start, glm::vec4 direction, float maxLen, VolumeStore<Voxel>* volume) {
+    start.w = 0.5;
+    direction.w = 0;
+    glm::vec4 lineFitLength;
+    glm::vec4 cur = start;
+    glm::vec4 vec4VolSz(volume->size,10000);
+    glm::vec4 vec4Zeros(0);
+
+	
+	glm::vec4 directSign = glm::sign(direction);
+    glm::vec4 oneOverDirection = glm::vec4(1)/direction;
+	glm::vec4 heaviside  = glm::round((directSign + 1.f) / 2.f);
+    glm::vec4 dotWith = glm::vec4(1,volume->size.x,volume->size.y*volume->size.x,0);
+
+    // abritrarily small constant, don't read into it
+    float eps = 0.00030;
+	glm::vec4 directSignEpsilon = directSign*eps;
+	
+	
+    for(;;) {
+		glm::vec4 curPlusEpsilon = cur+directSignEpsilon;    // Ensure that things on a boundary will be rounded to the correct position.
+		glm::vec4 distToNextGrid = glm::floor(curPlusEpsilon)+heaviside-cur; // If it's negative, we keep the floor. If not, we change this into a ceil.
+        glm::vec4 normalizedDist = distToNextGrid*oneOverDirection;
+        // Find horizontal minimum. This could potentially kill our performance on SIMD operations... 
+        float minDistN = fmin(fmin(normalizedDist.x,normalizedDist.y),normalizedDist.z);
+        cur += (minDistN * direction);
+
+        glm::ivec4 roundPos(cur);
+
+        if(
+            (roundPos.x >= volume->size.x) | 
+            (roundPos.y >= volume->size.y) |
+            (roundPos.z >= volume->size.z) |
+            (roundPos.x <  0) |
+            (roundPos.y <  0) |
+            (roundPos.z <  0)
+        ) {
+            break;
+        }
+
+        //int ind = glm::dot(dotWith,glm::floor(cur));
+        Voxel vox = volume->sample(roundPos);
+
+        if(vox.rgba.a > 0) {
+            return RaycastReport<Voxel>{true, cur, vox};
+        }
     }
     return RaycastReport<Voxel>{};
 }
@@ -191,11 +240,11 @@ void raycastOntoScreen() {
     ydiff    = glm::vec3(0,  2,0)/(float)window->size.y;
     xdiff    = glm::vec3(2 * ((float)window->size.x)/window->size.y, 0,0)/(float)window->size.x;  
 
-    std::cout << xdiff.x << " " << xdiff.y << " " << xdiff.z << std::endl;
+    //std::cout << xdiff.x << " " << xdiff.y << " " << xdiff.z << std::endl;
 
-    std::cout << ydiff.x << " " << ydiff.y << " " << ydiff.z << std::endl;
+    //std::cout << ydiff.x << " " << ydiff.y << " " << ydiff.z << std::endl;
 
-    std::cout << curYLoop.x << " " << curYLoop.y << " " << curYLoop.z << std::endl;
+    //std::cout << curYLoop.x << " " << curYLoop.y << " " << curYLoop.z << std::endl;
 
 
 	glm::ivec2 pixel(0,0);
@@ -204,7 +253,7 @@ void raycastOntoScreen() {
 		glm::vec3 curXLoop(curYLoop);
         for(pixel.x = 0; pixel.x < window->size.x; ++pixel.x) {
 
-            RaycastReport<Voxel> b = raycast_naiive(camPos, glm::normalize(curXLoop), 200.f, myVol);
+            RaycastReport<Voxel> b = raycast_naiive_vec4(glm::vec4(camPos,0), glm::vec4(glm::normalize(curXLoop),0), 200.f, myVol);
             
             //glm::vec3 vvvec = glm::normalize(curXLoop);
             //screenTex->data_stream[pixel.x + pixel.y * window->size.x] = Voxel::fromNormalizedFloats(vvvec.x,vvvec.y,vvvec.z).rgba;
@@ -246,13 +295,18 @@ struct KeyHandler {
 
 KeyHandler keys;
 
-
+int frame = 0;
+int ms = 0;
+int ms_prev = 0;
+int ms_start = 0;
 int main(int argc, char* argv[]) {
     window = new Window_SDL();
     window->create(glm::ivec2(400,300));
     screenTex = new Texture_SDL(glm::ivec2(400,300));
 
     myVol = new VolumeStore<Voxel>({100,100,100}, Voxel(255,255,255,255));
+
+    ms = (ms_start = SDL_GetTicks());
 
 	
 	bool running = true;
@@ -262,33 +316,34 @@ int main(int argc, char* argv[]) {
 		window->clear();
 		window->drawTexture(screenTex);
 		SDL_RenderPresent(window->renderer);
-
-        for(int i = 0; i < 50; i++) {
-            SDL_Delay(10);
             
             
-            
-            SDL_Event event;
-            while(SDL_PollEvent(&event)) {
-                switch (event.type) {
-                    
-                case SDL_QUIT:
-                    running = false;
-                    break;
-                    
-                case SDL_KEYDOWN:
-                    keys.setKeyState(event.key.keysym.scancode, true);
-                    break;
-                    
-                case SDL_KEYUP:
-                    keys.setKeyState(event.key.keysym.scancode, false);
-                    break;
+        SDL_Event event;
+        while(SDL_PollEvent(&event)) {
+            switch (event.type) {
                 
-                }
-            }
+            case SDL_QUIT:
+                running = false;
+                break;
+                
+            case SDL_KEYDOWN:
+                keys.setKeyState(event.key.keysym.scancode, true);
+                break;
+                
+            case SDL_KEYUP:
+                keys.setKeyState(event.key.keysym.scancode, false);
+                break;
             
-            running &= !keys.getIfKeyDown(SDL_SCANCODE_ESCAPE); // can exit program using escape key
+            }
         }
+        
+        running &= !keys.getIfKeyDown(SDL_SCANCODE_ESCAPE); // can exit program using escape key
+
+        ms_prev = ms;
+        ms = SDL_GetTicks();
+        ++frame;
+
+        std::cout << "Frame : " << frame << "\n\tCur Frame Time: " << ms-ms_prev << "\n\tAvg Frame Time: " << (ms - ms_start)/frame << std::endl;
     }
 	
     return 0;
