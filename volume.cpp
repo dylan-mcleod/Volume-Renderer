@@ -23,55 +23,90 @@ struct Voxel {
     Voxel(): rgba(0) {}
 };
 
-
 // Base class which -- you guessed it -- stores volume data
 template<typename Data_T>
-class VolumeStore {
+class VolumeStore_Base {
 public:
     glm::ivec3 size;
+	VolumeStore_Base(glm::ivec3 size): size(size) {}
+
+	virtual ~VolumeStore_Base() {}
+
+	inline bool inBounds(glm::ivec3 p) {
+		return 
+			(p.x < size.x) & 
+			(p.y < size.y) &
+			(p.z < size.z) &
+			(p.x > 0) &
+			(p.y > 0) &
+			(p.z > 0);
+	}
+
+	virtual inline Data_T& sample(int x, int y, int z) = 0;
+
+    virtual inline void put(Data_T d, int x, int y, int z) = 0;
+
+	virtual inline Data_T& sample(glm::ivec3 inp) = 0;
+
+	virtual inline void put(Data_T d, glm::ivec3 inp) = 0;
+
+
+
+};
+
+// Default Volume Store which stores data in an array. Pretty great, right?
+template<typename Data_T>
+class VolumeStore: public VolumeStore_Base<Data_T> {
+public:
     Data_T *data;
 
-    inline Data_T& sample(glm::ivec3 inp) {
-        return data[inp.x + size.x * (inp.y + size.y * inp.z)];
-    }
-
     inline Data_T& sample(int x, int y, int z) {
-        return data[x + size.x * (y + size.y * z)];
-    }
-
-	inline void put(Data_T d, glm::ivec3 inp) {
-        data[inp.x + size.x * (inp.y + size.y * inp.z)] = d;
+        return data[x + this->size.x * (y + this->size.y * z)];
     }
 
     inline void put(Data_T d, int x, int y, int z) {
-    	data[x + size.x * (y + size.y * z)] = d;
+    	data[x + this->size.x * (y + this->size.y * z)] = d;
     }
 
-	
+    inline Data_T& sample(glm::ivec3 inp) {
+        return data[inp.x + this->size.x * (inp.y + this->size.y * inp.z)];
+    }
 
+	inline void put(Data_T d, glm::ivec3 inp) {
+        data[inp.x + this->size.x * (inp.y + this->size.y * inp.z)] = d;
+    }
 
-    VolumeStore(glm::ivec3 size, Data_T fillCircle = Data_T()): size(size) {
-        data = new Data_T[size.x*size.y*size.z];
+    VolumeStore(glm::ivec3 size): VolumeStore_Base<Data_T>(size) {
+        data = new Data_T[this->size.x*this->size.y*this->size.z];
+    }
 
-
-        // make this a sphere
-
+	// load this up with a hardcoded sphere, so we can test without access to files
+	void fillSphere(Data_T fillWith) {
         glm::ivec3 pt(0);
         int ind = 0;
-        glm::vec3 mid = glm::vec3(size)/glm::vec3(2.f);
-        for(pt.z=0; pt.z < size.z; ++pt.z) {
-            for(pt.y=0; pt.y < size.y; ++pt.y) {
-                for(pt.x=0; pt.x < size.x; ++pt.x) {
-                    glm::vec3 rad = 4.0f*(glm::vec3(pt)-mid)/(glm::vec3(size));
+        glm::vec3 mid = glm::vec3(this->size)/glm::vec3(2.f);
+        for(pt.z=0; pt.z < this->size.z; ++pt.z) {
+            for(pt.y=0; pt.y < this->size.y; ++pt.y) {
+                for(pt.x=0; pt.x < this->size.x; ++pt.x) {
+                    glm::vec3 rad = 4.0f*(glm::vec3(pt)-mid)/(glm::vec3(this->size));
                     float radSquare = glm::dot(rad,rad);
                     bool yes = radSquare < 1;
-                    data[ind] = yes?fillCircle:Data_T();
+                    data[ind] = yes?fillWith:Data_T();
                     ++ind;
                 }
             }
         }
-    }
+	}
 };
+
+
+
+// Spooky business here. A real black magic data structure. 
+template<typename Data_T>
+class SparseVoxelOctree {
+
+};
+
 
 bool isAboveThreshold(Voxel vox, uint8_t threshold) {
 	return ((vox.rgba.r > threshold) | (vox.rgba.b > threshold) | (vox.rgba.g > threshold)) & (vox.rgba.a > threshold);

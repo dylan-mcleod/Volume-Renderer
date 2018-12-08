@@ -183,18 +183,33 @@ RaycastReport<Voxel> raycast_naiive_vec4(glm::vec4 start, glm::vec4 direction, f
     return RaycastReport<Voxel>{};
 }
 
+int frame = 0;
+
 void raycastOntoScreen() {
 
     screenTex->lock();
 
     //glm::mat4 model = glm::mat4();
 
+    int mouseX, mouseY;
 
-    glm::vec3  camPos(50,50,0);
-    glm::vec3  lookAt(1/sqrt(3));
+    SDL_GetMouseState(&mouseX, &mouseY);
+
+    float mX = 2.f * mouseX / (float)window->size.x - 1.f;
+    float mY = 2.f * mouseY / (float)window->size.y - 1.f;
+
+
+    glm::vec3  camPos(50,50,99);
+
+    //camPos = glm::vec3(cos(frame/16.f)*50.f+50.f, 50.f, sin(frame/16.f)*50.f+50.f);
+
+
+    //glm::vec3  lookAt = glm::normalize(glm::vec3(myVol->size.x, myVol->size.y, myVol->size.z)/2.f-camPos);
+    //lookAt.z = -lookAt.z;
+    glm::vec3  lookAt(0,0,1);
     glm::vec3  up(0,1,0); // This is lazy, but who cares? We're taking the cardinal direction y and calling it up. True up, if you will.
 
-    //glm::mat4 view = glm::lookAt(camPos, lookAt, up);
+    glm::mat4 view = glm::lookAt(glm::vec3(0,0,0), lookAt, up);
 
     float FOV = 60.0 * M_PI / 180.0; // this is in radians, to make everyone's lives easier.
 	
@@ -205,40 +220,21 @@ void raycastOntoScreen() {
     glm::mat4 projection = glm::perspective(FOV, (float)window->size.x / window->size.y, 0.001f, d);
 	
 	
-	glm::mat4 VP = projection;
-	glm::mat4 iVP = glm::inverse(VP);
+	glm::mat4 iV = glm::inverse(view);
+    //iV = glm::mat4(1);
+
+    std::cout << iV[0][0] << " " << iV[1][0] << " " << iV[2][0] << " " << iV[3][0] << "\n" <<
+                 iV[0][1] << " " << iV[1][1] << " " << iV[2][1] << " " << iV[3][1] << "\n" <<
+                 iV[0][2] << " " << iV[1][2] << " " << iV[2][2] << " " << iV[3][2] << "\n" <<
+                 iV[0][3] << " " << iV[1][3] << " " << iV[2][3] << " " << iV[3][3] << std::endl;
 
 
 
-	glm::vec4 topleft    (-1,-1,1,1);
-	glm::vec4 topright   (-1, 1,1,1);
-	glm::vec4 bottomleft ( 1,-1,1,1);
-	glm::vec4 bottomright( 1, 1,1,1);
-	
+    glm::vec4 curYLoop = iV*glm::vec4(-1 * ((float)window->size.x)/window->size.y,-1,d,0);
+    glm::vec4 ydiff    = iV*glm::vec4(0,  2,0,0)/(float)window->size.y;
+    glm::vec4 xdiff    = iV*glm::vec4(2 * ((float)window->size.x)/window->size.y, 0,0,0)/(float)window->size.x;  
 
-	topleft = iVP * topleft;
-	topright = iVP * bottomright;
-	bottomleft = iVP * topleft;
-	bottomright = iVP * bottomright;
-	
-	topleft     /= topleft.w;
-	topright    /= topright.w;
-	bottomleft  /= bottomleft.w;
-	bottomright /= bottomright.w;
-
-	glm::vec3 xdiff = topright-topleft;
-	glm::vec3 ydiff = bottomleft-topleft;
-	xdiff /= window->size.x;
-	ydiff /= window->size.y;
-
-	glm::vec3 curYLoop = topleft;
-    curYLoop -= camPos;
-
-
-
-    curYLoop = glm::vec3(-1 * ((float)window->size.x)/window->size.y,-1,d);
-    ydiff    = glm::vec3(0,  2,0)/(float)window->size.y;
-    xdiff    = glm::vec3(2 * ((float)window->size.x)/window->size.y, 0,0)/(float)window->size.x;  
+    curYLoop.w = ydiff.w = xdiff.w = 0;
 
     //std::cout << xdiff.x << " " << xdiff.y << " " << xdiff.z << std::endl;
 
@@ -250,16 +246,16 @@ void raycastOntoScreen() {
 	glm::ivec2 pixel(0,0);
     for(pixel.y = 0; pixel.y < window->size.y; ++pixel.y) {
 	
-		glm::vec3 curXLoop(curYLoop);
+		glm::vec4 curXLoop(curYLoop);
         for(pixel.x = 0; pixel.x < window->size.x; ++pixel.x) {
 
-            RaycastReport<Voxel> b = raycast_naiive_vec4(glm::vec4(camPos,0), glm::vec4(glm::normalize(curXLoop),0), 200.f, myVol);
+            RaycastReport<Voxel> b = raycast_naiive_vec4(glm::vec4(camPos,0), glm::normalize(curXLoop), 200.f, myVol);
             
             //glm::vec3 vvvec = glm::normalize(curXLoop);
             //screenTex->data_stream[pixel.x + pixel.y * window->size.x] = Voxel::fromNormalizedFloats(vvvec.x,vvvec.y,vvvec.z).rgba;
 
 			if(b.found) {
-                float normB = (glm::length(b.ptEnd-camPos)-20.f) / 30.f * 255.f;
+                float normB = (glm::length(b.ptEnd-camPos)-5.f) / 50.f * 255.f;
                 uint8_t l = normB;
 				screenTex->data_stream[pixel.x + pixel.y*window->size.x] = glm::u8vec4(255,l,l,l);
                 //std::cout << "Wow!" << std::endl;
@@ -295,16 +291,19 @@ struct KeyHandler {
 
 KeyHandler keys;
 
-int frame = 0;
 int ms = 0;
 int ms_prev = 0;
 int ms_start = 0;
+
+int sizeX = 600, sizeY = 400;
+
 int main(int argc, char* argv[]) {
     window = new Window_SDL();
-    window->create(glm::ivec2(400,300));
-    screenTex = new Texture_SDL(glm::ivec2(400,300));
+    window->create(glm::ivec2(sizeX,sizeY));
+    screenTex = new Texture_SDL(glm::ivec2(sizeX,sizeY));
 
-    myVol = new VolumeStore<Voxel>({100,100,100}, Voxel(255,255,255,255));
+    myVol = new VolumeStore<Voxel>({100,100,100});
+    myVol->fillSphere(Voxel(255));
 
     ms = (ms_start = SDL_GetTicks());
 
@@ -342,8 +341,9 @@ int main(int argc, char* argv[]) {
         ms_prev = ms;
         ms = SDL_GetTicks();
         ++frame;
-
         std::cout << "Frame : " << frame << "\n\tCur Frame Time: " << ms-ms_prev << "\n\tAvg Frame Time: " << (ms - ms_start)/frame << std::endl;
+        std::cout << "\tCasting " << sizeX << "*" << sizeY << " rays per frame, this is " << sizeX * sizeY * (1000.f/((ms - ms_start)/frame)) << " raycasts per second" << std::endl;
+        std::cout << "\ton a " << myVol->size.x << "*" << myVol->size.y << "*" << myVol->size.z << " dataset." << std::endl;
     }
 	
     return 0;
