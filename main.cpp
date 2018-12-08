@@ -10,56 +10,14 @@
 #include <cmath>
 #include <map>
 
+// This is temporary, please don't yell at me
+#include "volume.cpp"
+
+
 #define Handle_Error_SDL(x) if(x) std::cout << "SDL Error: " << SDL_GetError() << " (Error code" << x << ")" << std::endl;
 
-// Base class which -- you guessed it -- stores volume data
-class VolumeStore {
-public:
-    glm::ivec3 startB, endB;
-    glm::ivec3 size;
-    bool *data;
 
-    inline bool& sample_local(glm::ivec3 inp) {
-        return data[inp.x + size.x * (inp.y + size.y * inp.z)];
-    }
-
-    inline bool& sample_local(int x, int y, int z) {
-        return data[x + size.x * (y + size.y * z)];
-    }
-
-    inline bool& sample(glm::ivec3 inp) {
-        return data[(inp.x-startB.x) + startB.x * ((inp.y-startB.y) + startB.y * (inp.z-startB.z))];
-    }
-
-    inline bool& sample(int x, int y, int z) {
-        return data[(x-startB.x) + startB.x * ((y-startB.y) + startB.y * (z-startB.z))];
-    }
-
-    VolumeStore(glm::ivec3 startB, glm::ivec3 endB) {
-        size = endB-startB;
-        data = new bool[size.x*size.y*size.z];
-
-
-        // make this a sphere
-
-        glm::ivec3 pt = startB;
-        int ind = 0;
-        glm::vec3 mid = glm::vec3(endB)/glm::vec3(2.f);
-        for(pt.z=startB.z; pt.z < endB.z; ++pt.z) {
-            for(pt.y=startB.y; pt.y < endB.y; ++pt.y) {
-                for(pt.x=startB.x; pt.x < endB.x; ++pt.x) {
-                    glm::vec3 rad = 4.3f*(glm::vec3(pt)-mid)/(glm::vec3(size));
-                    float radSquare = glm::dot(rad,rad);
-                    bool yes = radSquare < 1;
-                    data[ind] = yes;
-                    ++ind;
-                }
-            }
-        }
-
-    }
-};
-VolumeStore *myVol;
+VolumeStore<Voxel> *myVol;
 
 struct Texture_SDL;
 
@@ -132,7 +90,14 @@ void Window_SDL::clear() {
 	SDL_RenderClear(renderer);
 }
 
-float raycast_naiive(glm::vec3 start, glm::vec3 direction, float maxLen, VolumeStore* volume) {
+template<typename Data_T>
+struct RaycastReport {
+    bool found = false;
+    glm::vec3 ptEnd = glm::vec3(0);
+    Data_T dataAt = Data_T();
+};
+
+RaycastReport<Voxel> raycast_naiive(glm::vec3 start, glm::vec3 direction, float maxLen, VolumeStore<Voxel>* volume) {
     glm::vec3 lineFitLength;
     glm::vec3 cur = start;
 
@@ -158,34 +123,16 @@ float raycast_naiive(glm::vec3 start, glm::vec3 direction, float maxLen, VolumeS
         if((
             (roundedPos.x < volume->size.x) & (roundedPos.y < volume->size.y) & (roundedPos.z < volume->size.z) 
           & (roundedPos.x >=0) & (roundedPos.y >=0) & (roundedPos.z >=0)
-          ) 
-            && volume->sample_local(roundedPos)) {
-                //std::cout << "a" << std::endl;
-                return glm::length(cur-start);
+          )) {
+                Voxel vox = volume->sample(roundedPos);
+                if(vox.rgba.a > 0) {
+                    //std::cout << "a" << std::endl;
+                    return RaycastReport<Voxel>{true, cur, vox};
+                }
             }
     }
-    return -1;
+    return RaycastReport<Voxel>{};
 }
-
-struct Voxel {
-    glm::u8vec4 rgba;
-    glm::u8vec4 norm = glm::u8vec4(0);
-
-    Voxel(uint8_t R, uint8_t G, uint8_t B, uint8_t A = 255): rgba(R,G,B,A) {}
-    Voxel(uint8_t l): rgba(l,l,l,255) {}
-    static Voxel fromUnsignedShort(unsigned short l) { return Voxel(l>>8,l>>8,l>>8); }
-    static Voxel fromNormalizedFloats(float R, float G, float B, float A = 1.f) { 
-         return Voxel(
-            (uint8_t)floor(R*255.f), 
-            (uint8_t)floor(G*255.f), 
-            (uint8_t)floor(B*255.f), 
-            (uint8_t)floor(A*255.f)
-        ); 
-    }
-
-    // empty by default
-    Voxel(): rgba(0) {}
-};
 
 void raycastOntoScreen() {
 
@@ -198,7 +145,7 @@ void raycastOntoScreen() {
     glm::vec3  lookAt(1/sqrt(3));
     glm::vec3  up(0,1,0); // This is lazy, but who cares? We're taking the cardinal direction y and calling it up. True up, if you will.
 
-    glm::mat4 view = glm::lookAt(camPos, lookAt, up);
+    //glm::mat4 view = glm::lookAt(camPos, lookAt, up);
 
     float FOV = 60.0 * M_PI / 180.0; // this is in radians, to make everyone's lives easier.
 	
@@ -257,13 +204,13 @@ void raycastOntoScreen() {
 		glm::vec3 curXLoop(curYLoop);
         for(pixel.x = 0; pixel.x < window->size.x; ++pixel.x) {
 
-            float b = raycast_naiive(camPos, glm::normalize(curXLoop), 200.f, myVol);
+            RaycastReport<Voxel> b = raycast_naiive(camPos, glm::normalize(curXLoop), 200.f, myVol);
             
             //glm::vec3 vvvec = glm::normalize(curXLoop);
             //screenTex->data_stream[pixel.x + pixel.y * window->size.x] = Voxel::fromNormalizedFloats(vvvec.x,vvvec.y,vvvec.z).rgba;
 
-			if(b >= 0) {
-                float normB = (b-20.f) / 30.f * 255.f;
+			if(b.found) {
+                float normB = (glm::length(b.ptEnd-camPos)-20.f) / 30.f * 255.f;
                 uint8_t l = normB;
 				screenTex->data_stream[pixel.x + pixel.y*window->size.x] = glm::u8vec4(255,l,l,l);
                 //std::cout << "Wow!" << std::endl;
@@ -305,7 +252,7 @@ int main(int argc, char* argv[]) {
     window->create(glm::ivec2(400,300));
     screenTex = new Texture_SDL(glm::ivec2(400,300));
 
-    myVol = new VolumeStore({0,0,0}, {100,100,100});
+    myVol = new VolumeStore<Voxel>({100,100,100}, Voxel(255,255,255,255));
 
 	
 	bool running = true;
