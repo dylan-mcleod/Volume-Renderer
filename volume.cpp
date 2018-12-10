@@ -14,14 +14,14 @@
 #include <iostream>
 #include <fstream>
 #include <chrono>
-#include "DGtal/helpers/StdDefs.h"
-#include "DGtal/shapes/MeshVoxelizer.h"
-#include "DGtal/kernel/sets/CDigitalSet.h"
-#include "DGtal/kernel/domains/HyperRectDomain.h"
-#include "DGtal/io/readers/MeshReader.h"
-#include "DGtal/io/Display3D.h"
-#include "DGtal/io/writers/GenericWriter.h"
-#include "DGtal/images/ImageContainerBySTLVector.h"
+#include <DGtal/helpers/StdDefs.h>
+#include <DGtal/shapes/MeshVoxelizer.h>
+#include <DGtal/kernel/sets/CDigitalSet.h>
+#include <DGtal/kernel/domains/HyperRectDomain.h>
+#include <DGtal/io/readers/MeshReader.h>
+#include <DGtal/io/Display3D.h>
+#include <DGtal/io/writers/GenericWriter.h>
+#include <DGtal/images/ImageContainerBySTLVector.h>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
@@ -107,6 +107,10 @@ namespace volly {
 
 		VolumeStore(glm::ivec3 size): VolumeStore_Base<Data_T>(size) {
 			data = new Data_T[this->size.x*this->size.y*this->size.z];
+		}
+
+		~VolumeStore() {
+			delete[] data;
 		}
 
 		// load this up with a hardcoded sphere, so we can test without access to files
@@ -212,6 +216,12 @@ namespace volly {
 				}
 
 
+				glm::vec3 norm({p[0],p[1],p[2]});
+				norm = glm::vec3((*myVol)->size)/2.f - norm;
+				norm = glm::normalize(norm) + 1.f;
+				norm = norm*127.f;
+				v.norm = glm::u8vec4(norm,0);
+
 
 				(*myVol)->put(v,p[0],p[1],p[2]);
 			}
@@ -230,6 +240,7 @@ namespace volly {
 
 		Image3D::Point r = d.upperBound();
 		Image3D::Point l = d.lowerBound();
+
 
 		std::cout << l[0] << l[1] << l[2] << std::endl;
 		std::cout << r[0] << r[1] << r[2] << std::endl;

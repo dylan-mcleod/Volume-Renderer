@@ -4,7 +4,7 @@ main.exe: main.o Makefile
 	$(CXX) -o main.exe main.o libDGtal.so -l mingw32 -l SDL2main -l SDL2
 
 main.o: main.cpp volume.cpp Makefile
-	$(CXX) -g -Wall -c -o main.o main.cpp
+	$(CXX) -c -o main.o main.cpp
 
 clean: 
 	rm -f main.o main.exe

@@ -25,8 +25,6 @@ namespace volly {
         std::cout << label << ": " << v.x << " " << v.y << " " << v.z << " " << v.w << std::endl;
     }
 
-    VolumeStore<Voxel> *myVol;
-
     struct Texture_SDL;
 
     class Window_SDL {
@@ -41,7 +39,6 @@ namespace volly {
         void clear();
     };
 
-    Window_SDL  *window;
 
     // wrapper around SDL_Texture
     struct Texture_SDL {
@@ -60,21 +57,119 @@ namespace volly {
             data_stream = nullptr;
         }
         
-        Texture_SDL(glm::ivec2 size) {
+        Texture_SDL(glm::ivec2 size, Window_SDL* win) {
             this->size = size;
 
-            _texture = SDL_CreateTexture(window->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, size.x, size.y);
+            _texture = SDL_CreateTexture(win->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, size.x, size.y);
 
             data_stream = nullptr;
         }
 
     };
 
-    struct State {
 
+    struct KeyHandler {
+        
+        std::map<SDL_Scancode, bool> keysDown;
+        
+        bool getIfKeyDown(SDL_Scancode scan) {
+            return keysDown[scan];
+        }
+        
+        /** state is either down (true) or up (false) */
+        void setKeyState(SDL_Scancode scan, bool state=true) {
+            keysDown[scan] = state;
+        }
+        
+        
     };
 
-    Texture_SDL *screenTex;
+    struct Vol_LOD_Set {
+        int sLowR, lowR, medR, highR;
+        VolumeStore<Voxel> *sLow, *low, *med, *high;
+        VolumeStore<Voxel> *arr[4]; // different way to reference the same thing
+
+        Vol_LOD_Set(std::string filename, int coloringMode = 0, int sLowR=16, int lowR=32, int medR=128, int highR=512): sLowR(sLowR), lowR(lowR), medR(medR), highR(highR) {
+            readOFFFile<26>(filename, medR , &med,  coloringMode);
+            readOFFFile<26>(filename, highR, &high, coloringMode);
+
+            sLow = new VolumeStore<Voxel>(glm::ivec3(sLowR));
+            low = new VolumeStore<Voxel>(glm::ivec3(lowR));
+
+            for(int i = 0; i < highR; ++i) {
+                for(int j = 0; j < highR; ++j) {
+                    for(int k = 0; k < highR; ++k) {
+
+                        if(high->sample(i,j,k).rgba.a > 0) {
+                            
+                            glm::ivec3 sLowSample(i,j,k);
+                            sLowSample *= sLowR;
+                            sLowSample /= highR;
+
+                            glm::ivec3 lowSample(i,j,k);
+                            lowSample *= lowR;
+                            lowSample /= highR;
+
+                            sLow->put(high->sample(i,j,k),sLowSample);
+                            low->put(high->sample(i,j,k),lowSample);                        
+
+                        }
+
+                    }
+                }
+            }
+
+            arr[0] = sLow;
+            arr[1] = low;
+            arr[2] = med;
+            arr[3] = high;
+        }
+
+        ~Vol_LOD_Set() {
+            delete sLow;
+            delete low;
+            delete med;
+            delete high;
+        }
+    };
+
+    glm::vec3 bgColor(0.0);
+
+    struct State {
+        Window_SDL  *window;
+        Texture_SDL *screenTex;
+        std::vector<Vol_LOD_Set*> volumes;
+        int curVolume = 0, curLoD = 0;
+        int frame = 0;
+
+        glm::vec3 camPos = glm::vec3(0);
+        glm::vec3 camDir = glm::vec3(0);
+        glm::vec3 camUp = glm::vec3(0,0,-1);
+
+        glm::mat4 view;
+
+        KeyHandler keys;
+
+        int mouseX, mouseY, mouseDX, mouseDY;
+        
+
+        int ms = 0;
+        int ms_prev = 0;
+        int ms_start = 0;
+
+        int winSizeX = 1152, winSizeY = 864;
+        int renderTargetSizeX = 400, renderTargetSizeY = 300;
+
+        void raycastOntoScreen();
+        void initAllVolumes();
+        void resolveUserInput();
+        void vollyMainLoop();
+        VolumeStore<Voxel>* getCurVol() { return volumes[curVolume]->arr[curLoD]; }
+        VolumeStore<Voxel>* getCurVol_LowLOD() { return volumes[curVolume]->arr[1]; }
+        VolumeStore<Voxel>* getCurVol_SLowLOD() { return volumes[curVolume]->arr[0]; }
+    };
+
+    
 
     void Window_SDL::create(glm::ivec2 size) {
         this->size = size;
@@ -103,91 +198,46 @@ namespace volly {
     template<typename Data_T>
     struct RaycastReport {
         bool found = false;
-        glm::vec3 ptEnd = glm::vec3(0);
+        glm::vec4 ptEnd = glm::vec4(0);
         Data_T dataAt = Data_T();
     };
 
-    RaycastReport<Voxel> raycast_naiive(glm::vec3 start, glm::vec3 direction, float maxLen, VolumeStore<Voxel>* volume) {
-        glm::vec3 lineFitLength;
-        glm::vec3 cur = start;
-
-        int numIters = maxLen; // todo: compute this
-        
-        glm::vec3 directSign = glm::sign(direction);
-        glm::vec3 heaviside  = glm::round((directSign + 1.f) / 2.f);
-
-        // abritrarily small constant, don't read into it
-        float eps = 5.f * 0.00006;
-        glm::vec3 directSignEpsilon = directSign*eps;
-        
-        
-        for(int i = 0; i < numIters; i++) {
-            glm::vec3 curPlusEpsilon = cur+directSignEpsilon;    // Ensure that things on a boundary will be rounded to the correct position.
-            glm::vec3 distToNextGrid = glm::floor(curPlusEpsilon)+heaviside-cur; // If it's negative, we keep the floor. If not, we change this into a ceil.
-            glm::vec3 normalizedDist = distToNextGrid/direction;
-            // Find horizontal minimum. This could potentially kill our performance on SIMD operations... 
-            float minDistN = fmin(fmin(normalizedDist.x,normalizedDist.y),normalizedDist.z);
-            cur += (minDistN * direction);
-
-            glm::ivec3 roundedPos = glm::ivec3(glm::floor(cur));
-            if((
-                (roundedPos.x < volume->size.x) & (roundedPos.y < volume->size.y) & (roundedPos.z < volume->size.z) 
-            & (roundedPos.x >=0) & (roundedPos.y >=0) & (roundedPos.z >=0)
-            )) {
-                    Voxel vox = volume->sample(roundedPos);
-                    if(vox.rgba.a > 0) {
-                        //std::cout << "a" << std::endl;
-                        return RaycastReport<Voxel>{true, glm::vec3(cur), vox};
-                    }
-                }
-        }
-        return RaycastReport<Voxel>{};
-    }
-
-    RaycastReport<Voxel> raycast_naiive_vec4(glm::vec4 start, glm::vec4 direction, float maxLen, VolumeStore<Voxel>* volume) {
+    template<bool solid = false>
+    RaycastReport<Voxel> raycast_naiive_vec4(glm::vec4 start, glm::vec4 direction, VolumeStore<Voxel>* volume) {
         start.w = 0.5;
         direction.w = 0;
         glm::vec4 lineFitLength;
         glm::vec4 vec4VolSz(volume->size,10000);
         glm::vec4 vec4Zeros(0);
-
         
         glm::vec4 directSign = glm::sign(direction);
         glm::vec4 oneOverDirection = glm::vec4(1)/direction;
         glm::vec4 heaviside  = glm::round((directSign + 1.f) / 2.f);
-        glm::vec4 dotWith = glm::vec4(1,volume->size.x,volume->size.y*volume->size.x,0);
-
-
-        // find where the ray intersects the volume, if we're outside it
-        glm::vec4 distToVolume = -glm::fma(vec4VolSz, glm::vec4(1)-heaviside, start);
-        glm::vec4 normDistToVolume = directSign * distToVolume / direction;
-        float maxNormDistToVolume = fmax(fmax(fmax(normDistToVolume.x,normDistToVolume.y),normDistToVolume.z),0);
-        glm::vec4 cur = maxNormDistToVolume*direction+start;
-
-        /*
-        if(rand()%1000000 == 0) {
-            printVec4(start, "start");
-            printVec4(direction, "direction");
-            printVec4(distToVolume, "distToVolume");
-            printVec4(normDistToVolume, "normDistToVolume");
-            std::cout << "maxNormDistToVolume: " <<  maxNormDistToVolume << std::endl;
-            printVec4(cur, "cur");
-        }*/
 
         // abritrarily small constant, don't read into it
         float eps = 0.00030;
         glm::vec4 directSignEpsilon = directSign*eps;
 
-        glm::vec4 curPlusEpsilon = cur+directSignEpsilon;  // Ensure that things on a boundary will be rounded to the correct position.
+        // find where the ray intersects the volume, if we're outside it
+        glm::vec4 distToVolume = -glm::fma(vec4VolSz, heaviside-glm::vec4(1), start);
+        glm::vec4 normDistToVolume = distToVolume * oneOverDirection;
+        float maxNormDistToVolume = fmax(fmax(fmax(normDistToVolume.x,normDistToVolume.y),normDistToVolume.z),0);
+        glm::vec4 cur = maxNormDistToVolume*direction+start;         
+
+        if(false) {
+            printVec4(start, "start");
+            printVec4(direction, "direction");
+            printVec4(distToVolume, "distToVolume");
+            printVec4(normDistToVolume, "normDistToVolume");
+            printVec4(cur, "cur");
+        }   
+        
+
+
+        glm::vec4 curPlusEpsilon;  
         for(;;) {
-            glm::vec4 distToNextGrid = glm::floor(curPlusEpsilon)+heaviside-cur; // If it's negative, we keep the floor. If not, we change this into a ceil.
-            glm::vec4 normalizedDist = distToNextGrid*oneOverDirection;
-            // Find horizontal minimum. This could potentially kill our performance on SIMD operations... 
-            float minDistN = fmin(fmin(normalizedDist.x,normalizedDist.y),normalizedDist.z);
-            cur += (minDistN * direction);
 
-            curPlusEpsilon = cur+directSignEpsilon; // calculate this right here instead of at the beginning, because we want to use it for sampling
-
+            curPlusEpsilon = cur+directSignEpsilon; // Ensure that things on a boundary will be rounded to the correct position.
             glm::ivec4 roundPos(curPlusEpsilon);
 
             if(
@@ -201,151 +251,185 @@ namespace volly {
                 break;
             }
 
-            //int ind = glm::dot(dotWith,glm::floor(cur));
             Voxel vox = volume->sample(roundPos);
 
-            if(vox.rgba.a > 0) {
-                return RaycastReport<Voxel>{true, cur, vox};
+            if(!solid) {
+                if(vox.rgba.a > 0) {
+                    return RaycastReport<Voxel>{true, cur, vox};
+                }
+            } else {
+                if(vox.rgba.a == 0) {
+                    return RaycastReport<Voxel>{true, cur, vox};
+                }
             }
+
+            glm::vec4 distToNextGrid = glm::floor(curPlusEpsilon)+heaviside-cur; // If it's negative, we keep the floor. If not, we change this into a ceil.
+            glm::vec4 normalizedDist = distToNextGrid*oneOverDirection;
+            // Find horizontal minimum. This could potentially kill our performance on SIMD operations... 
+            float minDistN = fmin(fmin(normalizedDist.x,normalizedDist.y),normalizedDist.z);
+            cur += (minDistN * direction);
+
+
+           
         }
-        return RaycastReport<Voxel>{};
+
+        Voxel ret(bgColor.r,bgColor.g,bgColor.b);
+        return RaycastReport<Voxel>{false, cur, ret};
     }
 
-    int frame = 0;
+    RaycastReport<Voxel> raycast_beamOpt(glm::vec4 start, glm::vec4 direction, VolumeStore<Voxel>* lowRes, VolumeStore<Voxel>* highRes, glm::vec4 direction_lowp, glm::vec4 scaleLowptoHighp) {
+        RaycastReport<Voxel> lowpRep = raycast_naiive_vec4(start, direction_lowp, lowRes);
+        return raycast_naiive_vec4(scaleLowptoHighp*lowpRep.ptEnd, direction, highRes);
+    }
 
-    void raycastOntoScreen() {
+
+
+int iterationNumber = 3;
+glm::vec4 oneOver127 = glm::vec4(1.f/127.f);
+glm::vec4 oneOver255 = glm::vec4(1.f/255.f);
+glm::vec4 minusOne = glm::vec4(1);
+    glm::vec4 raytrace_naiive(int curIteration, glm::vec4 start, glm::vec4 direction, VolumeStore<Voxel>* volume) {
+        RaycastReport<Voxel> rep = raycast_naiive_vec4(start, direction, volume);
+
+        if(curIteration <= 1 || !rep.found) return glm::vec4(rep.dataAt.rgba)*oneOver255;
+
+        glm::vec4 norm(rep.dataAt.norm);
+        norm = glm::fma(norm, oneOver127, minusOne);
+
+        glm::vec4 reflectDir = glm::reflect(direction, norm);
+        glm::vec4 refractDir = glm::refract(direction, norm, 2.f);
+
+        RaycastReport<Voxel> repRefract = raycast_naiive_vec4<true>(rep.ptEnd, refractDir, volume);
+
+        glm::vec4 reflectCol = raytrace_naiive(curIteration-1, rep.ptEnd, reflectDir, volume);
+        glm::vec4 refractCol = raytrace_naiive(curIteration-1, repRefract.ptEnd, direction, volume);
+
+        float amtReflect = 0.35;
+        float amtRefract = 0.00;
+        float amtDiffuse = 0.65;
+        return amtReflect * reflectCol + amtRefract * refractCol + amtDiffuse * glm::vec4(rep.dataAt.rgba)*oneOver255;
+    }
+
+
+    void State::raycastOntoScreen() {
 
         screenTex->lock();
 
-        //glm::mat4 model = glm::mat4();
-
-        int mouseX, mouseY;
-
-        SDL_GetMouseState(&mouseX, &mouseY);
-
-        float mX = 2.f * mouseX / (float)window->size.x - 1.f;
-        float mY = 2.f * mouseY / (float)window->size.y - 1.f;
+        VolumeStore<Voxel>* volToRender = getCurVol();
 
 
-        glm::vec3  camPos(30,-20,64);
-        //glm::vec3  center(64,48,32);  // teapot128
-
-        glm::vec3  center(256,192,128);  // teapot512
-
-        camPos = glm::vec3(cos(mX*M_PI)*(center.x)+center.x, sin(mX*M_PI)*center.y+center.y, center.z + center.z*mY);
-
-
-        glm::vec3  lookDir(cos(mX*M_PI), sin(mX*M_PI), mY/2);
-
-        std::cout << "lookDir: " << lookDir.x << ", " << lookDir.y << ", " << lookDir.z << std::endl;
-
-        glm::vec3  up(0,0,-1); // We're taking the cardinal direction y and calling it up. True up, if you will.
-
-        glm::mat4 view = glm::lookAt(glm::vec3(0,0,0), lookDir, up);
+        glm::mat4 model = glm::scale(glm::mat4(1),glm::vec3(1.f)/glm::vec3(volToRender->size));
+        glm::mat4 MV = view * model;
 
         float FOV = 90.0 * M_PI / 180.0; // this is in radians, to make everyone's lives easier.
-        
-        
         float d = 1/tan(FOV/2);
         
-        glm::mat4 projection = glm::perspective(FOV, (float)window->size.x / window->size.y, 0.001f, d);
-        
-        
-        glm::mat4 iV = glm::inverse(view);
-        //iV = glm::mat4(1);
+        glm::mat4 iMV = glm::inverse(MV);
 
-        std::cout << iV[0][0] << " " << iV[1][0] << " " << iV[2][0] << " " << iV[3][0] << "\n" <<
-                    iV[0][1] << " " << iV[1][1] << " " << iV[2][1] << " " << iV[3][1] << "\n" <<
-                    iV[0][2] << " " << iV[1][2] << " " << iV[2][2] << " " << iV[3][2] << "\n" <<
-                    iV[0][3] << " " << iV[1][3] << " " << iV[2][3] << " " << iV[3][3] << std::endl;
+        //std::cout << iMV[0][0] << " " << iMV[1][0] << " " << iMV[2][0] << " " << iMV[3][0] << "\n" <<
+        //            iMV[0][1] << " " << iMV[1][1] << " " << iMV[2][1] << " " << iMV[3][1] << "\n" <<
+        //            iMV[0][2] << " " << iMV[1][2] << " " << iMV[2][2] << " " << iMV[3][2] << "\n" <<
+        //            iMV[0][3] << " " << iMV[1][3] << " " << iMV[2][3] << " " << iMV[3][3] << std::endl;
 
 
 
-        glm::vec4 curYLoop = iV*glm::vec4(-1 * ((float)window->size.x)/window->size.y,-1,d,0);
-        glm::vec4 ydiff    = iV*glm::vec4(0,  2,0,0)/(float)window->size.y;
-        glm::vec4 xdiff    = iV*glm::vec4(2 * ((float)window->size.x)/window->size.y, 0,0,0)/(float)window->size.x;  
+        glm::vec4 curYLoop = iMV*glm::vec4(-1 * ((float)renderTargetSizeX)/renderTargetSizeY,-1,d,0);
+        glm::vec4 ydiff    = iMV*glm::vec4(0,  2,0,0)/(float)renderTargetSizeY;
+        glm::vec4 xdiff    = iMV*glm::vec4(2 * ((float)renderTargetSizeX)/renderTargetSizeY, 0,0,0)/(float)renderTargetSizeX;  
+
+        //printVec4(glm::vec4(camPos,0), "camPos");
+        //printVec4(glm::vec4(camDir,0), "camDir");
+        //printVec4(glm::vec4(camUp,0),   "camUp");
+
+
+        glm::vec4 camPos_Local = glm::inverse(model) * glm::vec4(camPos,1);
+        camPos_Local /= camPos_Local.w;
+        camPos_Local.w = 0;
 
         curYLoop.w = ydiff.w = xdiff.w = 0;
 
 
+        glm::mat4 lowpmodel = glm::scale(glm::mat4(1),glm::vec3(1.f)/glm::vec3(getCurVol_LowLOD()->size));
+        glm::mat4 lowpMV = view * lowpmodel;
+        glm::mat4 lowpiMV = glm::inverse(lowpMV);
+
+        glm::vec4 scaleLowptoHighp = glm::vec4(volToRender->size,0) / glm::vec4(getCurVol_LowLOD()->size,1);
+
+        glm::vec4 curYLooplowp = lowpiMV*glm::vec4(-1 * ((float)renderTargetSizeX)/renderTargetSizeY,-1,d,0);
+        glm::vec4 ydifflowp    = lowpiMV*glm::vec4(0,  2,0,0)/(float)renderTargetSizeY;
+        glm::vec4 xdifflowp    = lowpiMV*glm::vec4(2 * ((float)renderTargetSizeX)/renderTargetSizeY, 0,0,0)/(float)renderTargetSizeX;  
+        curYLooplowp.w = ydifflowp.w = xdifflowp.w = 0;
+
+
+        glm::vec4 camPos_Local_lowP = glm::inverse(lowpmodel) * glm::vec4(camPos,1);
+        camPos_Local /= camPos_Local.w;
+        camPos_Local.w = 0;
+
         glm::ivec2 pixel(0,0);
-        for(pixel.y = 0; pixel.y < window->size.y; ++pixel.y) {
+        for(pixel.y = 0; pixel.y < renderTargetSizeY; ++pixel.y) {
         
             glm::vec4 curXLoop(curYLoop);
-            for(pixel.x = 0; pixel.x < window->size.x; ++pixel.x) {
+            glm::vec4 curXLooplowp(curYLooplowp);
+            for(pixel.x = 0; pixel.x < renderTargetSizeX; ++pixel.x) {
 
-                RaycastReport<Voxel> b = raycast_naiive_vec4(glm::vec4(camPos,0), glm::normalize(curXLoop), 200.f, myVol);
                 
-                //glm::vec3 vvvec = glm::normalize(curXLoop);
-                //screenTex->data_stream[pixel.x + pixel.y * window->size.x] = Voxel::fromNormalizedFloats(vvvec.x,vvvec.y,vvvec.z).rgba;
-
+                RaycastReport<Voxel> b = raycast_beamOpt(camPos_Local_lowP, glm::normalize(curXLoop), getCurVol_LowLOD(), volToRender, glm::normalize(curXLooplowp), scaleLowptoHighp);
+                //RaycastReport<Voxel> b = raycast_naiive_vec4(camPos_Local, glm::normalize(curXLoop), volToRender);
                 if(b.found) {
-                    float normB = (glm::length(b.ptEnd-camPos)) / 256.f * 255.f;
-                    uint8_t l = normB;
-                    screenTex->data_stream[pixel.x + pixel.y*window->size.x] = glm::u8vec4(255,b.dataAt.rgba.r,b.dataAt.rgba.g,b.dataAt.rgba.b);
-                    //std::cout << "Wow!" << std::endl;
+                    screenTex->data_stream[pixel.x + pixel.y*renderTargetSizeX] = glm::u8vec4(255,b.dataAt.rgba.r,b.dataAt.rgba.g,b.dataAt.rgba.b);
                 } else {
-                    screenTex->data_stream[pixel.x + pixel.y*window->size.x] = glm::u8vec4(255,0,0,0);
+                    screenTex->data_stream[pixel.x + pixel.y*renderTargetSizeX] = glm::u8vec4(255,0,0,0);
                 }
+                
+                //glm::vec4 rayTraceColor = glm::clamp(raytrace_naiive(iterationNumber, camPos_Local, glm::normalize(curXLoop), volToRender),glm::vec4(0),glm::vec4(1));
+
+                //glm::u8vec4 colorVec(255, glm::vec3(rayTraceColor)*255.f);
+
+                //screenTex->data_stream[pixel.x + pixel.y*renderTargetSizeX] = colorVec;
+
+
                 curXLoop += xdiff;
+                curXLooplowp += xdifflowp;
             }
             curYLoop += ydiff;
+            curYLooplowp += ydifflowp;
         }
         
 
         screenTex->unlock();
-
-
     }
 
-    struct KeyHandler {
-        
-        std::map<SDL_Scancode, bool> keysDown;
-        
-        bool getIfKeyDown(SDL_Scancode scan) {
-            return keysDown[scan];
-        }
-        
-        /** state is either down (true) or up (false) */
-        void setKeyState(SDL_Scancode scan, bool state=true) {
-            keysDown[scan] = state;
-        }
-        
-        
-    };
-
-    KeyHandler keys;
-
-    int ms = 0;
-    int ms_prev = 0;
-    int ms_start = 0;
-
-    int sizeX = 400, sizeY = 300;
-    int renderSizeX = 400, renderSizeY = 300;
-
-    int vollyMain() {
+    void State::vollyMainLoop() {
         window = new Window_SDL();
-        window->create(glm::ivec2(sizeX,sizeY));
-        screenTex = new Texture_SDL(glm::ivec2(sizeX,sizeY));
+        window->create(glm::ivec2(winSizeX,winSizeY));
+        screenTex = new Texture_SDL(glm::ivec2(renderTargetSizeX,renderTargetSizeY), window);
 
-        readOFFFile<6>("galleon.off", 512, &myVol, 2);
-
-        //myVol = new VolumeStore<Voxel>({256,256,256});
-        //myVol->fillSphere(Voxel(255));
+        initAllVolumes();
 
         ms = (ms_start = SDL_GetTicks());
 
         
         bool running = true;
+        
+        SDL_SetRelativeMouseMode(SDL_TRUE);
+        mouseX = 0;
+        mouseY = 0;
+        mouseDX = 0;
+        mouseDY = 0;
         while(running) {
+            resolveUserInput(); 
+            
+
             raycastOntoScreen();
             SDL_SetRenderDrawColor(window->renderer, 255, 0, 255, 255);
             window->clear();
             window->drawTexture(screenTex);
             SDL_RenderPresent(window->renderer);
                 
-                
+
+
             SDL_Event event;
+
             while(SDL_PollEvent(&event)) {
                 switch (event.type) {
                     
@@ -360,7 +444,13 @@ namespace volly {
                 case SDL_KEYUP:
                     keys.setKeyState(event.key.keysym.scancode, false);
                     break;
-                
+
+                case SDL_MOUSEMOTION:
+                    mouseX = event.motion.x;
+                    mouseY = (winSizeY - event.motion.y);
+                    mouseDX += event.motion.xrel;
+                    mouseDY += -event.motion.yrel;
+                    break;
                 }
             }
             
@@ -368,16 +458,95 @@ namespace volly {
 
             ms_prev = ms;
             ms = SDL_GetTicks();
+
             ++frame;
+
             std::cout << "Frame : " << frame << "\n\tCur Frame Time: " << ms-ms_prev << "\n\tAvg Frame Time: " << (ms - ms_start)/frame << std::endl;
-            std::cout << "\tCasting " << sizeX << "*" << sizeY << " rays per frame, this is " << sizeX * sizeY * (1000.f/((ms - ms_start)/frame)) << " raycasts per second" << std::endl;
-            std::cout << "\ton a " << myVol->size.x << "*" << myVol->size.y << "*" << myVol->size.z << " dataset." << std::endl;
+
+            std::cout << "\tCasting " << renderTargetSizeX << "*" << renderTargetSizeY << " rays per frame, this is " 
+                      << renderTargetSizeX * renderTargetSizeY * (1000.f/(ms-ms_prev)) << " raycasts per second" << std::endl;
+
+            std::cout << "\ton a " << getCurVol()->size.x << "*" << getCurVol()->size.y << "*" << getCurVol()->size.z << " dataset." << std::endl;
         }
+    }
+
+
+// Only load one of the models, because that takes time!
+#define FASTLOAD
+
+    
+    void State::initAllVolumes() {
+        // what a glorious collection!
         
-        return 0;
+#ifndef FASTLOAD
+        volumes.push_back(new Vol_LOD_Set("icosahedron.off")); // 0
+        volumes.push_back(new Vol_LOD_Set("teapot.off"));      // 1
+#endif
+        volumes.push_back(new Vol_LOD_Set("galleon.off"));     // 2
+#ifndef FASTLOAD
+        volumes.push_back(new Vol_LOD_Set("dragon.off"));      // 3
+        volumes.push_back(new Vol_LOD_Set("footbones.off"));   // 4
+        volumes.push_back(new Vol_LOD_Set("sandal.off"));      // 5
+        volumes.push_back(new Vol_LOD_Set("stratocaster.off"));// 6
+        volumes.push_back(new Vol_LOD_Set("walkman.off"));     // 7
+        volumes.push_back(new Vol_LOD_Set("dolphins.off"));    // 8
+#endif
+
+    }
+
+    void State::resolveUserInput() {
+        // mouse (set camera direction)
+
+        camUp  = glm::vec3(0,0,-1);
+        camDir = glm::vec3(cos(2.5f*(-mouseX)*M_PI / winSizeX), sin(2.5f*(-mouseX)*M_PI / winSizeX), -4.f*mouseY/(float)winSizeY+2.f);
+        camDir += 0.000003f;
+        camDir = glm::normalize(camDir);
+
+        view = glm::lookAt(glm::vec3(0), camDir, camUp);
+
+        // WASD (move the camera)
+        float dy = 0, dx = 0, dz = 0;
+        float speed = 0.01;
+        if(keys.getIfKeyDown(SDL_SCANCODE_W)) dy += 1;
+        if(keys.getIfKeyDown(SDL_SCANCODE_A)) dx -= 1;
+        if(keys.getIfKeyDown(SDL_SCANCODE_S)) dy -= 1;
+        if(keys.getIfKeyDown(SDL_SCANCODE_D)) dx += 1;
+        if(keys.getIfKeyDown(SDL_SCANCODE_LCTRL)) dz -= 1;
+        if(keys.getIfKeyDown(SDL_SCANCODE_LSHIFT)) dz += 1;
+
+        glm::vec3 Dy = -camDir*dy;
+        camPos += speed*Dy;
+        
+        glm::vec3 right = glm::cross(camUp, camDir);
+        
+        glm::vec3 Dx = -right*dx;
+        camPos += speed*Dx;
+
+        glm::vec3 Dz = -camUp*dz;
+        camPos += speed*Dz;
+
+#ifndef FASTLOAD
+        // interface
+        if(keys.getIfKeyDown(SDL_SCANCODE_0)) curVolume = 0;
+        if(keys.getIfKeyDown(SDL_SCANCODE_1)) curVolume = 1; 
+        if(keys.getIfKeyDown(SDL_SCANCODE_2)) curVolume = 2;
+        if(keys.getIfKeyDown(SDL_SCANCODE_3)) curVolume = 3;
+        if(keys.getIfKeyDown(SDL_SCANCODE_4)) curVolume = 4;
+        if(keys.getIfKeyDown(SDL_SCANCODE_5)) curVolume = 5;
+        if(keys.getIfKeyDown(SDL_SCANCODE_6)) curVolume = 6;
+        if(keys.getIfKeyDown(SDL_SCANCODE_7)) curVolume = 7;
+        if(keys.getIfKeyDown(SDL_SCANCODE_8)) curVolume = 8;
+#endif
+
+        if(keys.getIfKeyDown(SDL_SCANCODE_M))      curLoD = 0;
+        if(keys.getIfKeyDown(SDL_SCANCODE_COMMA))  curLoD = 1;
+        if(keys.getIfKeyDown(SDL_SCANCODE_PERIOD)) curLoD = 2;
+        if(keys.getIfKeyDown(SDL_SCANCODE_SLASH))  curLoD = 3;
     }
 }
 
 int main(int argc, char* argv[]) {
-    return volly::vollyMain();
+    volly::State state;
+    state.vollyMainLoop();
+    return 0;
 }
