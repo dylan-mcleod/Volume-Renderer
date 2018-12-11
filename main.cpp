@@ -3,17 +3,11 @@
 #define GLM_FORCE_ALIGNED
 #include <iostream>
 #include <fstream>
-#include <SDL2/SDL.h>
-#include <glm/glm.hpp>
-//#include <glm/gtx/simd_vec4.hpp>
-//#include <glm/gtx/simd_mat4.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <cmath>
-#include <map>
-// This is temporary, please don't yell at me
-#include "volume.cpp"
-
+#include "voxel.h"
+#include "volume.h"
+#include "main.h"
 
 namespace volly {
 
@@ -25,149 +19,55 @@ namespace volly {
         std::cout << label << ": " << v.x << " " << v.y << " " << v.z << " " << v.w << std::endl;
     }
 
-    struct Texture_SDL;
 
-    class Window_SDL {
-    public:
-        SDL_Window *window;
-        SDL_Renderer *renderer;
+    Vol_LOD_Set::Vol_LOD_Set(std::string filename, int coloringMode, int sLowR, int lowR, int medR, int highR): sLowR(sLowR), lowR(lowR), medR(medR), highR(highR) {
+        med = readOFFFile(filename, medR , coloringMode);
+        high = readOFFFile(filename, highR, coloringMode);
 
-        glm::ivec2 size;
+        //std::cout << med->size.x <<  "!" << med->size.y << "!" << med->size.z << std::endl;
+        //std::cout << high->size.x <<  "!" << high->size.y << "!" << high->size.z << std::endl;
 
-        void create(glm::ivec2 size);
-        void drawTexture(Texture_SDL * tex, glm::ivec2 _pos = glm::ivec2(0), glm::ivec2 _size = glm::ivec2(-1));
-        void clear();
-    };
+        sLow = new VolumeStore<Voxel>(glm::ivec3(sLowR));
+        low = new VolumeStore<Voxel>(glm::ivec3(lowR));
 
+        //std::cout << sLow->size.x <<  " " << sLow->size.y << " " << sLow->size.z << std::endl;
+        //std::cout << low->size.x <<  " " << low->size.y << " " << low->size.z << std::endl;
 
-    // wrapper around SDL_Texture
-    struct Texture_SDL {
-        SDL_Texture *_texture;
-        glm::u8vec4 *data_stream; // This is write-only data that should only be written to between lock-unlock calls (mutexes?)
-        int pitch;
-        glm::ivec2 size;
+        std::cout << sLowR << std::endl;
+        std::cout << lowR << std::endl;
 
-        // Assigns data_stream and allows it to be written to
-        void lock() {
-            SDL_LockTexture(_texture, NULL, (void**) &data_stream, &pitch);
-        }
+        for(int i = 0; i < highR; ++i) {
+            for(int j = 0; j < highR; ++j) {
+                for(int k = 0; k < highR; ++k) {
 
-        void unlock() {
-            SDL_UnlockTexture(_texture);
-            data_stream = nullptr;
-        }
-        
-        Texture_SDL(glm::ivec2 size, Window_SDL* win) {
-            this->size = size;
+                    if(high->sample(i,j,k).rgba.a > 0) {
+                        
+                        glm::ivec3 sLowSample(i,j,k);
+                        sLowSample *= sLowR;
+                        sLowSample /= highR;
 
-            _texture = SDL_CreateTexture(win->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, size.x, size.y);
+                        glm::ivec3 lowSample(i,j,k);
+                        lowSample *= lowR;
+                        lowSample /= highR;
 
-            data_stream = nullptr;
-        }
-
-    };
-
-
-    struct KeyHandler {
-        
-        std::map<SDL_Scancode, bool> keysDown;
-        
-        bool getIfKeyDown(SDL_Scancode scan) {
-            return keysDown[scan];
-        }
-        
-        /** state is either down (true) or up (false) */
-        void setKeyState(SDL_Scancode scan, bool state=true) {
-            keysDown[scan] = state;
-        }
-        
-        
-    };
-
-    struct Vol_LOD_Set {
-        int sLowR, lowR, medR, highR;
-        VolumeStore<Voxel> *sLow, *low, *med, *high;
-        VolumeStore<Voxel> *arr[4]; // different way to reference the same thing
-
-        Vol_LOD_Set(std::string filename, int coloringMode = 0, int sLowR=16, int lowR=32, int medR=128, int highR=512): sLowR(sLowR), lowR(lowR), medR(medR), highR(highR) {
-            readOFFFile<26>(filename, medR , &med,  coloringMode);
-            readOFFFile<26>(filename, highR, &high, coloringMode);
-
-            sLow = new VolumeStore<Voxel>(glm::ivec3(sLowR));
-            low = new VolumeStore<Voxel>(glm::ivec3(lowR));
-
-            for(int i = 0; i < highR; ++i) {
-                for(int j = 0; j < highR; ++j) {
-                    for(int k = 0; k < highR; ++k) {
-
-                        if(high->sample(i,j,k).rgba.a > 0) {
-                            
-                            glm::ivec3 sLowSample(i,j,k);
-                            sLowSample *= sLowR;
-                            sLowSample /= highR;
-
-                            glm::ivec3 lowSample(i,j,k);
-                            lowSample *= lowR;
-                            lowSample /= highR;
-
-                            sLow->put(high->sample(i,j,k),sLowSample);
-                            low->put(high->sample(i,j,k),lowSample);                        
-
-                        }
+                        sLow->put(high->sample(i,j,k),sLowSample);
+                        low->put(high->sample(i,j,k),lowSample);                        
 
                     }
+
                 }
             }
-
-            arr[0] = sLow;
-            arr[1] = low;
-            arr[2] = med;
-            arr[3] = high;
         }
 
-        ~Vol_LOD_Set() {
-            delete sLow;
-            delete low;
-            delete med;
-            delete high;
-        }
-    };
+        arr[0] = sLow;
+        arr[1] = low;
+        arr[2] = med;
+        arr[3] = high;
+    }
+
+
 
     glm::vec3 bgColor(0.0);
-
-    struct State {
-        Window_SDL  *window;
-        Texture_SDL *screenTex;
-        std::vector<Vol_LOD_Set*> volumes;
-        int curVolume = 0, curLoD = 0;
-        int frame = 0;
-
-        glm::vec3 camPos = glm::vec3(0);
-        glm::vec3 camDir = glm::vec3(0);
-        glm::vec3 camUp = glm::vec3(0,0,-1);
-
-        glm::mat4 view;
-
-        KeyHandler keys;
-
-        int mouseX, mouseY, mouseDX, mouseDY;
-        
-
-        int ms = 0;
-        int ms_prev = 0;
-        int ms_start = 0;
-
-        int winSizeX = 1152, winSizeY = 864;
-        int renderTargetSizeX = 400, renderTargetSizeY = 300;
-
-        void raycastOntoScreen();
-        void initAllVolumes();
-        void resolveUserInput();
-        void vollyMainLoop();
-        VolumeStore<Voxel>* getCurVol() { return volumes[curVolume]->arr[curLoD]; }
-        VolumeStore<Voxel>* getCurVol_LowLOD() { return volumes[curVolume]->arr[1]; }
-        VolumeStore<Voxel>* getCurVol_SLowLOD() { return volumes[curVolume]->arr[0]; }
-    };
 
     
 

@@ -5,6 +5,7 @@
 #include <ctime>
 #include <cstdlib>
 
+
 // We'll use this to load volume files, for the time being
 #include <DGtal/helpers/StdDefs.h>
 #include <DGtal/io/readers/GenericReader.h>
@@ -26,129 +27,20 @@
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
 
+
+#include "voxel.h"
+#include "volume.h"
+
+
 // I suppose this is necessary when you're interfacing with another volume library.
 namespace volly {
-
-	struct Voxel {
-		glm::u8vec4 rgba;
-		glm::u8vec4 norm = glm::u8vec4(0);
-
-		Voxel(uint8_t R, uint8_t G, uint8_t B, uint8_t A = 255): rgba(R,G,B,A) {}
-		Voxel(uint8_t l): rgba(l,l,l,255) {}
-		static Voxel fromUnsignedShort(unsigned short l) { return Voxel(l>>8,l>>8,l>>8); }
-		static Voxel fromNormalizedFloats(float R, float G, float B, float A = 1.f) { 
-			return Voxel(
-				(uint8_t)floor(R*255.f), 
-				(uint8_t)floor(G*255.f), 
-				(uint8_t)floor(B*255.f), 
-				(uint8_t)floor(A*255.f)
-			); 
-		}
-
-		// empty by default
-		Voxel(): rgba(0) {}
-	};
-
-	// Base class which -- you guessed it -- stores volume data
-	template<typename Data_T>
-	class VolumeStore_Base {
-	public:
-		glm::ivec3 size;
-		glm::ivec3 mid = glm::ivec3(0);
-		glm::vec4 size_v4  = glm::vec4(0);
-		glm::vec4 mid_v4  = glm::vec4(0);
-		VolumeStore_Base(glm::ivec3 size): size(size) {}
-
-		virtual ~VolumeStore_Base() {}
-
-		inline bool inBounds(glm::ivec3 p) {
-			return 
-				(p.x < size.x) & 
-				(p.y < size.y) &
-				(p.z < size.z) &
-				(p.x > 0) &
-				(p.y > 0) &
-				(p.z > 0);
-		}
-
-		virtual inline Data_T& sample(int x, int y, int z) = 0;
-
-		virtual inline void put(Data_T d, int x, int y, int z) = 0;
-
-		virtual inline Data_T& sample(glm::ivec3 inp) = 0;
-
-		virtual inline void put(Data_T d, glm::ivec3 inp) = 0;
-
-
-
-	};
-
-	// Default Volume Store which stores data in an array. Pretty great, right?
-	template<typename Data_T>
-	class VolumeStore: public VolumeStore_Base<Data_T> {
-	public:
-		Data_T *data;
-
-		inline Data_T& sample(int x, int y, int z) {
-			return data[x + this->size.x * (y + this->size.y * z)];
-		}
-
-		inline void put(Data_T d, int x, int y, int z) {
-			data[x + this->size.x * (y + this->size.y * z)] = d;
-		}
-
-		inline Data_T& sample(glm::ivec3 inp) {
-			return data[inp.x + this->size.x * (inp.y + this->size.y * inp.z)];
-		}
-
-		inline void put(Data_T d, glm::ivec3 inp) {
-			data[inp.x + this->size.x * (inp.y + this->size.y * inp.z)] = d;
-		}
-
-		VolumeStore(glm::ivec3 size): VolumeStore_Base<Data_T>(size) {
-			data = new Data_T[this->size.x*this->size.y*this->size.z];
-		}
-
-		~VolumeStore() {
-			delete[] data;
-		}
-
-		// load this up with a hardcoded sphere, so we can test without access to files
-		void fillSphere(Data_T fillWith) {
-			glm::ivec3 pt(0);
-			int ind = 0;
-			glm::vec3 mid = glm::vec3(this->size)/glm::vec3(2.f);
-			for(pt.z=0; pt.z < this->size.z; ++pt.z) {
-				for(pt.y=0; pt.y < this->size.y; ++pt.y) {
-					for(pt.x=0; pt.x < this->size.x; ++pt.x) {
-						glm::vec3 rad = 4.0f*(glm::vec3(pt)-mid)/(glm::vec3(this->size));
-						float radSquare = glm::dot(rad,rad);
-						bool yes = radSquare < 1;
-						data[ind] = yes?fillWith:Data_T();
-						++ind;
-					}
-				}
-			}
-		}
-	};
-
-
-
-	// Spooky business here. A real black magic data structure. 
-	template<typename Data_T>
-	class SparseVoxelOctree {
-
-	};
-
 
 	bool isAboveThreshold(Voxel vox, uint8_t threshold) {
 		return ((vox.rgba.r > threshold) | (vox.rgba.b > threshold) | (vox.rgba.g > threshold)) & (vox.rgba.a > threshold);
 	}
 
-
 	// shamelessly adapted from https://github.com/DGtal-team/DGtalTools/blob/master/converters/mesh2vol.cpp
-	template<int SEP>
-	void readOFFFile(std::string filename, int resolution, VolumeStore<Voxel>** myVol, int coloringMode) {
+	VolumeStore<Voxel>* readOFFFile(std::string filename, int resolution, int coloringMode) {
 
 		int margin = 0;
 		using namespace std;
@@ -179,12 +71,12 @@ namespace volly {
 		std::cout << std::endl;
 
 		std::cout << "Voxelization" << std::endl;
-		std::cout << "Voxelization " << SEP << "-separated ; " << resolution << "^3 ";
+		std::cout << "Voxelization " << 26 << "-separated ; " << resolution << "^3 ";
 		Domain aDomain(PointZ3().diagonal(-margin), PointZ3().diagonal(resolution+margin));
 
 		//Digitization step
 		Z3i::DigitalSet mySet(aDomain);
-		MeshVoxelizer<Z3i::DigitalSet, SEP> aVoxelizer;
+		MeshVoxelizer<Z3i::DigitalSet, 26> aVoxelizer;
 		aVoxelizer.voxelize(mySet, inputMesh, 1.0);
 		std::cout <<  " [done] " << std::endl;
 		std::cout << std::endl;
@@ -194,10 +86,11 @@ namespace volly {
 		std::cout << aDomain<<std::endl;
 
 		PointZ3 r = aDomain.upperBound();
-		(*myVol) = new VolumeStore<Voxel>({r[0],r[1],r[2]});
+		VolumeStore<Voxel>* myVol = new VolumeStore<Voxel>({resolution,resolution,resolution});
+		
 
 		for(auto p: mySet)
-			if((*myVol)->inBounds({p[0],p[1],p[2]})) {
+			if(myVol->inBounds({p[0],p[1],p[2]})) {
 				Voxel v;
 				if(coloringMode == 0) {
 					v = Voxel::fromNormalizedFloats(p[0]/(float)r[0],p[1]/(float)r[1],p[2]/(float)r[2]);
@@ -217,14 +110,16 @@ namespace volly {
 
 
 				glm::vec3 norm({p[0],p[1],p[2]});
-				norm = glm::vec3((*myVol)->size)/2.f - norm;
+				norm = glm::vec3(myVol->size)/2.f - norm;
 				norm = glm::normalize(norm) + 1.f;
 				norm = norm*127.f;
 				v.norm = glm::u8vec4(norm,0);
 
 
-				(*myVol)->put(v,p[0],p[1],p[2]);
+				myVol->put(v,p[0],p[1],p[2]);
 			}
+		std::cout << myVol->size.x << " " << myVol->size.y << " " << myVol->size.z << std::endl;
+		return myVol;
 	}
 
 
@@ -373,3 +268,4 @@ namespace volly {
 
 
 }
+
