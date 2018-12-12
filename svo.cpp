@@ -1,6 +1,5 @@
 #include <iostream>
 #include <fstream>
-#include <glm/glm.hpp>
 #include <cmath>
 #include <ctime>
 #include <cstdlib>
@@ -9,6 +8,7 @@
 #include <set>
 
 #include "voxel.h"
+#include "vollyglm.h"
 
 namespace volly {
     // SVO data structure from this lovely paper:
@@ -17,7 +17,7 @@ namespace volly {
         uint16_t childPtr; // &1 is far bit -- this must be masked out to dereference
         uint8_t  valid_mask;
         uint8_t  leaf_mask;
-        uint32_t countour; // not used
+        uint32_t countour; // we're using this as the child pointer for now...
     };
 
     // Spooky business here. A real black magic data structure. 

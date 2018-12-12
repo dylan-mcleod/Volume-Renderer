@@ -3,21 +3,24 @@
 #include <iostream>
 #include <fstream>
 #include <stack>
+#include <cmath>
+#include <cstdlib>
 #include "PLYfileReader.h"
 
 
+
 namespace volly {
-	Polyhedron readPLYFile(std::string filename){
+	Polyhedron* readPLYFile(std::string filename){
 		int numVert;
 		int numFaces;
 
 		bool header=true;
 		std::string inbound;
-		Polyhedron product;
+		Polyhedron* product = new Polyhedron{};
 
 
 		std::fstream file;
-		file.open("assets/" + filename);
+		file.open("assets/" + filename + ".ply");
 		if(file.is_open()){
 			while(header){
 				getline(file,inbound);
@@ -38,14 +41,14 @@ namespace volly {
 				glm::vec4 holdMe;
 				std::getline(file, inbound);
 				holdMe=stringToVec4(inbound);
-				product.verts.push_back(holdMe);
+				product->verts.push_back(holdMe);
 			}
 
 			for(int i=0;i<numFaces;i++){//loops through and creats a vector of faces
-				glm::ivec4 aLine;
+				glm::ivec3 aLine;
 				std::getline(file, inbound);
 				aLine=stringToivec4(inbound);
-				product.inds.push_back(aLine);
+				product->inds.push_back(aLine);
 			}
 			file.close();
 		}
@@ -112,7 +115,7 @@ namespace volly {
 		glm::ivec4 Loc;
 
 		spacePos=inbound.find(' ');
-		inbound.erase(0, spacePos);
+		inbound = inbound.erase(0, spacePos+1);
 
 		spacePos=inbound.find(' ');
 		holder1=inbound.substr(0, spacePos);
@@ -131,5 +134,71 @@ namespace volly {
 		Loc.z=Z;
 
 		return Loc;
+	}
+
+
+
+
+	void normalizePoly(Polyhedron* polyIn) {
+		
+		glm::vec4 min( 100000000000.f);
+		glm::vec4 max(-100000000000.f);
+
+		for(int i = 0; i < polyIn->verts.size(); i++) {
+			glm::vec4 g = polyIn->verts[i];
+			min.x = fmin(min.x, g.x);
+			min.y = fmin(min.y, g.y);
+			min.z = fmin(min.z, g.z);
+			max.x = fmax(max.x, g.x);
+			max.y = fmax(max.y, g.y);
+			max.z = fmax(max.z, g.z);
+		}
+
+		glm::vec4 mul = glm::vec4(1)/(max-min);
+		glm::vec4 add = -min*mul;
+
+		mul.w = 0;
+		add.w = 0;
+
+		for(int i = 0; i < polyIn->verts.size(); i++) {
+			glm::vec4 g = polyIn->verts[i];
+			g = glm::fma(g,mul,add);
+			g = glm::clamp(g,glm::vec4(0),glm::vec4(1));
+			polyIn->verts[i] = g;
+		}
+	}
+
+	
+    std::map<glm::ivec3, Voxel, ivec3_cmp>* rasterizeVoxelMapFromPoly(Polyhedron* polyIn, int res) {
+		normalizePoly(polyIn);
+		std::map<glm::ivec3, Voxel, ivec3_cmp>* ret = new std::map<glm::ivec3, Voxel, ivec3_cmp>();
+
+		float resF = res-1;
+		glm::vec4 resV(resF-1);
+
+		ret->emplace(glm::ivec3(0,0,0), Voxel::fromNormalizedFloats(1,1,1));
+
+		for(int i = 0; i < polyIn->inds.size(); i++) {
+			glm::ivec3 g = polyIn->inds[i];
+
+			glm::vec4 a = polyIn->verts[g.x];
+			glm::vec4 b = polyIn->verts[g.y];
+			glm::vec4 c = polyIn->verts[g.z];
+
+			glm::vec4 aS = a*resV;
+			glm::vec4 bS = b*resV;
+			glm::vec4 cS = c*resV;
+
+			glm::vec3 norm = glm::cross(glm::vec3(b-a),glm::vec3(b-c));
+			norm = glm::normalize(norm);
+			norm = glm::clamp(norm,glm::vec3(0),glm::vec3(1.f));
+
+			glm::u8vec4 normU8 = glm::u8vec4(norm.x * 255.f, norm.y * 255.f, norm.z * 255.f, 0);
+
+			Voxel v = Voxel::fromNormalizedFloats(a.r,a.g,a.b,1);
+			v.norm = normU8;
+			(*ret)[glm::ivec3(aS)] = v;
+		}
+		return ret;
 	}
 }

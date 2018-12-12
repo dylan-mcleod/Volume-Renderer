@@ -1,13 +1,13 @@
 #define _USE_MATH_DEFINES
 //#define GLM_FORCE_AVX // or GLM_FORCE_SSE2 if your processor doesn't support it
-#define GLM_FORCE_ALIGNED
+
 #include <iostream>
 #include <fstream>
-#include <glm/gtc/constants.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include "voxel.h"
 #include "volume.h"
 #include "main.h"
+#include "PLYfileReader.h"
+#include "vollyglm.h"
 
 namespace volly {
 
@@ -21,20 +21,16 @@ namespace volly {
 
 
     Vol_LOD_Set::Vol_LOD_Set(std::string filename, int coloringMode, int sLowR, int lowR, int medR, int highR): sLowR(sLowR), lowR(lowR), medR(medR), highR(highR) {
-        med = readOFFFile(filename, medR , coloringMode);
-        high = readOFFFile(filename, highR, coloringMode);
 
-        //std::cout << med->size.x <<  "!" << med->size.y << "!" << med->size.z << std::endl;
-        //std::cout << high->size.x <<  "!" << high->size.y << "!" << high->size.z << std::endl;
+        Polyhedron* asPoly = readPLYFile(filename);
+        normalizePoly(asPoly);
+        auto m1 = rasterizeVoxelMapFromPoly(asPoly, medR);
 
+        med = volumeFromVoxelMap(m1, medR);
+        auto m2 = rasterizeVoxelMapFromPoly(asPoly, highR);
+        high = volumeFromVoxelMap(m2, highR);
         sLow = new VolumeStore<Voxel>(glm::ivec3(sLowR));
         low = new VolumeStore<Voxel>(glm::ivec3(lowR));
-
-        //std::cout << sLow->size.x <<  " " << sLow->size.y << " " << sLow->size.z << std::endl;
-        //std::cout << low->size.x <<  " " << low->size.y << " " << low->size.z << std::endl;
-
-        std::cout << sLowR << std::endl;
-        std::cout << lowR << std::endl;
 
         for(int i = 0; i < highR; ++i) {
             for(int j = 0; j < highR; ++j) {
@@ -166,8 +162,8 @@ namespace volly {
             glm::vec4 distToNextGrid = glm::floor(curPlusEpsilon)+heaviside-cur; // If it's negative, we keep the floor. If not, we change this into a ceil.
             glm::vec4 normalizedDist = distToNextGrid*oneOverDirection;
             // Find horizontal minimum. This could potentially kill our performance on SIMD operations... 
-            float minDistN = fmin(fmin(normalizedDist.x,normalizedDist.y),normalizedDist.z);
-            cur += (minDistN * direction);
+            glm::vec4 minDistN(fmin(fmin(normalizedDist.x,normalizedDist.y),normalizedDist.z));
+            cur = glm::fma(minDistN, direction, cur);
 
 
            
@@ -379,17 +375,17 @@ glm::vec4 minusOne = glm::vec4(1);
         // what a glorious collection!
         
 #ifndef FASTLOAD
-        volumes.push_back(new Vol_LOD_Set("icosahedron.off")); // 0
-        volumes.push_back(new Vol_LOD_Set("teapot.off"));      // 1
+        volumes.push_back(new Vol_LOD_Set("icosahedron")); // 0
+        volumes.push_back(new Vol_LOD_Set("teapot"));      // 1
 #endif
-        volumes.push_back(new Vol_LOD_Set("galleon.off"));     // 2
+        volumes.push_back(new Vol_LOD_Set("galleon"));     // 2
 #ifndef FASTLOAD
-        volumes.push_back(new Vol_LOD_Set("dragon.off"));      // 3
-        volumes.push_back(new Vol_LOD_Set("footbones.off"));   // 4
-        volumes.push_back(new Vol_LOD_Set("sandal.off"));      // 5
-        volumes.push_back(new Vol_LOD_Set("stratocaster.off"));// 6
-        volumes.push_back(new Vol_LOD_Set("walkman.off"));     // 7
-        volumes.push_back(new Vol_LOD_Set("dolphins.off"));    // 8
+        volumes.push_back(new Vol_LOD_Set("dragon"));      // 3
+        volumes.push_back(new Vol_LOD_Set("footbones"));   // 4
+        volumes.push_back(new Vol_LOD_Set("sandal"));      // 5
+        volumes.push_back(new Vol_LOD_Set("stratocaster"));// 6
+        volumes.push_back(new Vol_LOD_Set("walkman"));     // 7
+        volumes.push_back(new Vol_LOD_Set("dolphins"));    // 8
 #endif
 
     }

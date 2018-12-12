@@ -2,7 +2,7 @@
 
 #define VOXEL_H
 
-#include <glm/glm.hpp>
+#include "vollyglm.h"
 
 
 
@@ -13,6 +13,12 @@ namespace volly {
 	struct Voxel {
 		glm::u8vec4 rgba;
 		glm::u8vec4 norm = glm::u8vec4(0);
+
+		Voxel(const Voxel& v) {
+			rgba = v.rgba;
+			norm = v.norm;
+		} 
+
 
 		Voxel(uint8_t R, uint8_t G, uint8_t B, uint8_t A = 255): rgba(R,G,B,A) {}
 		Voxel(uint8_t l): rgba(l,l,l,255) {}

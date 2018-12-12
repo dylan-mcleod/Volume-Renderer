@@ -3,12 +3,13 @@
 #define MAIN_H
 
 #include <SDL2/SDL.h>
-#include <glm/glm.hpp>
 #include <cmath>
 #include <map>
 #include <vector>
 #include "voxel.h"
 #include "volume.h"
+
+#include "vollyglm.h"
 
 namespace volly {
     struct Texture_SDL;

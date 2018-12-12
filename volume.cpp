@@ -1,11 +1,12 @@
 #include <iostream>
 #include <fstream>
-#include <glm/glm.hpp>
 #include <cmath>
 #include <ctime>
 #include <cstdlib>
 
 
+// The time being is OVER
+/*
 // We'll use this to load volume files, for the time being
 #include <DGtal/helpers/StdDefs.h>
 #include <DGtal/io/readers/GenericReader.h>
@@ -26,10 +27,12 @@
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
-
+*/
 
 #include "voxel.h"
 #include "volume.h"
+#include "PLYfileReader.h"
+#include "vollyglm.h"
 
 
 // I suppose this is necessary when you're interfacing with another volume library.
@@ -39,6 +42,8 @@ namespace volly {
 		return ((vox.rgba.r > threshold) | (vox.rgba.b > threshold) | (vox.rgba.g > threshold)) & (vox.rgba.a > threshold);
 	}
 
+
+/*
 	// shamelessly adapted from https://github.com/DGtal-team/DGtalTools/blob/master/converters/mesh2vol.cpp
 	VolumeStore<Voxel>* readOFFFile(std::string filename, int resolution, int coloringMode) {
 
@@ -52,7 +57,7 @@ namespace volly {
 
 		std::cout << "Preparing the mesh" << std::endl;
 		Mesh<PointR3> inputMesh;
-		MeshReader<PointR3>::importOFFFile(("assets/"+filename).c_str(), inputMesh);
+		MeshReader<PointR3>::importOFFFile(("assets/"+filename+".off").c_str(), inputMesh);
 		std::cout <<  " [done]" << std::endl;
 		const std::pair<PointR3, PointR3> bbox = inputMesh.getBoundingBox();
 		std::cout << "Mesh bounding box: "<<bbox.first <<" "<<bbox.second<<std::endl;
@@ -121,11 +126,14 @@ namespace volly {
 		std::cout << myVol->size.x << " " << myVol->size.y << " " << myVol->size.z << std::endl;
 		return myVol;
 	}
+*/
+
+	
 
 
-	typedef DGtal::ImageContainerBySTLMap<DGtal::Z3i::Domain, uint8_t> Image3D;
+	//typedef DGtal::ImageContainerBySTLMap<DGtal::Z3i::Domain, uint8_t> Image3D;
 
-
+/*
 	// You heard it here, folks -- this is another, entirely seperate volume file format which ends its filenames in .vol
 	// I sure hope somebody got fired for that blunder 
 	void readSimpleVolFile(std::string filename, VolumeStore<Voxel>** myVol) {
@@ -167,7 +175,8 @@ namespace volly {
 			}
 		}*/
 
-	}
+//	}
+
 
 
 

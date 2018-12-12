@@ -2,10 +2,20 @@
 
 #define VOLUME_H
 
-#include "voxel.h"
+#include <map>
 #include <string>
+#include <iostream>
+#include <cstdlib>
+
+#include "voxel.h"
 
 namespace volly {
+
+    struct ivec3_cmp {
+        bool operator() (const glm::ivec3 &a, const glm::ivec3 &b) {
+            return memcmp((void*) &a[0], (void*) &b[0], sizeof(glm::ivec3)) < 0;
+        }
+    };
 
 /*
     // Base class which -- you guessed it -- stores volume data
@@ -99,6 +109,16 @@ namespace volly {
 			}
 		}
 	};
+
+	inline VolumeStore<Voxel>* volumeFromVoxelMap(std::map<glm::ivec3, Voxel, ivec3_cmp>* mp, int res) {
+		VolumeStore<Voxel>* ret = new VolumeStore<Voxel>(glm::ivec3(res,res,res));
+
+		for(auto it = mp->begin(); it != mp->end(); ++it) {
+			ret->put(it->second,  it->first);
+		}
+
+		return ret;
+	}
 
 	VolumeStore<Voxel>* readOFFFile(std::string filename, int resolution, int coloringMode);
     
