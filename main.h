@@ -76,7 +76,7 @@ namespace volly {
         VolumeStore<Voxel> *sLow, *low, *med, *high;
         VolumeStore<Voxel> *arr[4]; // different way to reference the same thing
 
-        Vol_LOD_Set(std::string filename, int coloringMode = 0, int sLowR=16, int lowR=32, int medR=128, int highR=768);
+        Vol_LOD_Set(std::string filename, int coloringMode = 0, int sLowR=16, int lowR=32, int medR=128, int highR=256);
 
         ~Vol_LOD_Set() {
             delete sLow;

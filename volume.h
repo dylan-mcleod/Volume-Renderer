@@ -11,9 +11,9 @@
 
 namespace volly {
 
-    struct ivec3_cmp {
-        bool operator() (const glm::ivec3 &a, const glm::ivec3 &b) {
-            return memcmp((void*) &a[0], (void*) &b[0], sizeof(glm::ivec3)) < 0;
+    struct ivec4_cmp {
+        bool operator() (const glm::ivec4 &a, const glm::ivec4 &b) {
+            return memcmp((void*) &a[0], (void*) &b[0], sizeof(glm::ivec4)) < 0;
         }
     };
 
@@ -110,11 +110,12 @@ namespace volly {
 		}
 	};
 
-	inline VolumeStore<Voxel>* volumeFromVoxelMap(std::map<glm::ivec3, Voxel, ivec3_cmp>* mp, int res) {
+	inline VolumeStore<Voxel>* volumeFromVoxelMap(std::map<glm::ivec4, Voxel, ivec4_cmp>* mp, int res, int scale) {
 		VolumeStore<Voxel>* ret = new VolumeStore<Voxel>(glm::ivec3(res,res,res));
 
 		for(auto it = mp->begin(); it != mp->end(); ++it) {
-			ret->put(it->second,  it->first);
+			if(it->first.w == scale)
+				ret->put(it->second,  it->first);
 		}
 
 		return ret;

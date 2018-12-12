@@ -21,7 +21,7 @@ namespace volly {
 	};
 
     void normalizePoly(Polyhedron*);
-    std::map<glm::ivec3, Voxel, ivec3_cmp>* rasterizeVoxelMapFromPoly(Polyhedron* polyIn, int res);
+    std::map<glm::ivec4, Voxel, ivec4_cmp>* rasterizeVoxelMapFromPoly(Polyhedron* polyIn, int res);
     
 	int stringToInt(std::string);
 	Polyhedron* readPLYFile(std::string fileName);

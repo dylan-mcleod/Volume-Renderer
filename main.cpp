@@ -1,4 +1,4 @@
-#define _USE_MATH_DEFINES
+
 //#define GLM_FORCE_AVX // or GLM_FORCE_SSE2 if your processor doesn't support it
 
 #include <iostream>
@@ -22,21 +22,39 @@ namespace volly {
 
     Vol_LOD_Set::Vol_LOD_Set(std::string filename, int coloringMode, int sLowR, int lowR, int medR, int highR): sLowR(sLowR), lowR(lowR), medR(medR), highR(highR) {
 
+
         Polyhedron* asPoly = readPLYFile(filename);
         normalizePoly(asPoly);
         auto m1 = rasterizeVoxelMapFromPoly(asPoly, medR);
 
-        med = volumeFromVoxelMap(m1, medR);
+        
+
+        med = volumeFromVoxelMap(m1, medR, 0);
+        low = volumeFromVoxelMap(m1, lowR, 2);
+        sLow = volumeFromVoxelMap(m1, sLowR, 3);
         auto m2 = rasterizeVoxelMapFromPoly(asPoly, highR);
-        high = volumeFromVoxelMap(m2, highR);
+        high = volumeFromVoxelMap(m2, highR, 0);
+
+
+
+
+
+
+        med  = readOFFFile(filename, medR, 0);
+        high = readOFFFile(filename, highR, 0);
+
+        std::map<glm::ivec4, Voxel, ivec4_cmp>* octreeMap = new std::map<glm::ivec4, Voxel, ivec4_cmp>();
+
         sLow = new VolumeStore<Voxel>(glm::ivec3(sLowR));
         low = new VolumeStore<Voxel>(glm::ivec3(lowR));
-
         for(int i = 0; i < highR; ++i) {
             for(int j = 0; j < highR; ++j) {
                 for(int k = 0; k < highR; ++k) {
+                        
+                    Voxel v = high->sample(i,j,k);
 
-                    if(high->sample(i,j,k).rgba.a > 0) {
+                    if(v.rgba.a > 0) {
+                        
                         
                         glm::ivec3 sLowSample(i,j,k);
                         sLowSample *= sLowR;
@@ -46,14 +64,22 @@ namespace volly {
                         lowSample *= lowR;
                         lowSample /= highR;
 
-                        sLow->put(high->sample(i,j,k),sLowSample);
-                        low->put(high->sample(i,j,k),lowSample);                        
+                        sLow->put(v,sLowSample);
+                        low->put(v,lowSample);                        
+
+                        int oct = 0;
+                        for(int s = highR; s >= 1; s/=2) {
+                            octreeMap->emplace(glm::ivec4(glm::ivec3(i,j,k)/oct,s), v);
+                            ++oct;
+                        }
+
 
                     }
 
                 }
             }
         }
+
 
         arr[0] = sLow;
         arr[1] = low;

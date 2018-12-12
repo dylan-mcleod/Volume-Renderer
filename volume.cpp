@@ -5,8 +5,7 @@
 #include <cstdlib>
 
 
-// The time being is OVER
-/*
+
 // We'll use this to load volume files, for the time being
 #include <DGtal/helpers/StdDefs.h>
 #include <DGtal/io/readers/GenericReader.h>
@@ -27,7 +26,7 @@
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
-*/
+
 
 #include "voxel.h"
 #include "volume.h"
@@ -43,7 +42,7 @@ namespace volly {
 	}
 
 
-/*
+
 	// shamelessly adapted from https://github.com/DGtal-team/DGtalTools/blob/master/converters/mesh2vol.cpp
 	VolumeStore<Voxel>* readOFFFile(std::string filename, int resolution, int coloringMode) {
 
@@ -126,7 +125,7 @@ namespace volly {
 		std::cout << myVol->size.x << " " << myVol->size.y << " " << myVol->size.z << std::endl;
 		return myVol;
 	}
-*/
+
 
 	
 

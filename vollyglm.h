@@ -2,7 +2,7 @@
 
 #define VOLLYGLM_H
 
-
+#define _USE_MATH_DEFINES
 #define GLM_FORCE_ALIGNED
 
 
