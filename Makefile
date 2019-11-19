@@ -2,10 +2,10 @@
 
 CXX = g++ -mavx -std=c++14 -O3 -g -Wall 
 H_FILES = voxel.h volume.h main.h svo.h PLYfileReader.h
-O_FILES = volume.o main.o svo.o libDGtal.so PLYfileReader.o
+O_FILES = volume.o main.o svo.o PLYfileReader.o
 
 main.exe: $(O_FILES) Makefile
-	$(CXX) -o vraycaster.exe $(O_FILES) -l mingw32 -l SDL2main -l SDL2
+	$(CXX) -o vraycaster.exe $(O_FILES) -l mingw32 -l SDL2main -l SDL2 -l dgtal
 
 volume.o: volume.cpp $(H_FILES) Makefile
 	$(CXX) -c -o volume.o volume.cpp

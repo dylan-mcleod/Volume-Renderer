@@ -6,13 +6,14 @@
 #include <string>
 #include <iostream>
 #include <cstdlib>
+#include <cstring>
 
 #include "voxel.h"
 
 namespace volly {
 
     struct ivec4_cmp {
-        bool operator() (const glm::ivec4 &a, const glm::ivec4 &b) {
+        bool operator() (const glm::ivec4 &a, const glm::ivec4 &b) const {
             return memcmp((void*) &a[0], (void*) &b[0], sizeof(glm::ivec4)) < 0;
         }
     };

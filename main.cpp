@@ -37,56 +37,17 @@ namespace volly {
 
 
 
-
-
-
-        med  = readOFFFile(filename, medR, 0);
-        high = readOFFFile(filename, highR, 0);
-
         std::map<glm::ivec4, Voxel, ivec4_cmp>* octreeMap = new std::map<glm::ivec4, Voxel, ivec4_cmp>();
-
-        sLow = new VolumeStore<Voxel>(glm::ivec3(sLowR));
-        low = new VolumeStore<Voxel>(glm::ivec3(lowR));
-        for(int i = 0; i < highR; ++i) {
-            for(int j = 0; j < highR; ++j) {
-                for(int k = 0; k < highR; ++k) {
-                        
-                    Voxel v = high->sample(i,j,k);
-
-                    if(v.rgba.a > 0) {
-                        
-                        
-                        glm::ivec3 sLowSample(i,j,k);
-                        sLowSample *= sLowR;
-                        sLowSample /= highR;
-
-                        glm::ivec3 lowSample(i,j,k);
-                        lowSample *= lowR;
-                        lowSample /= highR;
-
-                        sLow->put(v,sLowSample);
-                        low->put(v,lowSample);                        
-
-                        int oct = 0;
-                        for(int s = highR; s >= 1; s/=2) {
-                            octreeMap->emplace(glm::ivec4(glm::ivec3(i,j,k)/oct,s), v);
-                            ++oct;
-                        }
-
-
-                    }
-
-                }
-            }
-        }
 
 
         arr[0] = sLow;
         arr[1] = low;
         arr[2] = med;
         arr[3] = high;
-    }
 
+        delete m1;
+        delete m2;
+    }
 
 
     glm::vec3 bgColor(0.0);
@@ -209,7 +170,7 @@ namespace volly {
 int iterationNumber = 3;
 glm::vec4 oneOver127 = glm::vec4(1.f/127.f);
 glm::vec4 oneOver255 = glm::vec4(1.f/255.f);
-glm::vec4 minusOne = glm::vec4(1);
+glm::vec4 minusOne = glm::vec4(-1);
     glm::vec4 raytrace_naiive(int curIteration, glm::vec4 start, glm::vec4 direction, VolumeStore<Voxel>* volume) {
         RaycastReport<Voxel> rep = raycast_naiive_vec4(start, direction, volume);
 
@@ -284,8 +245,8 @@ glm::vec4 minusOne = glm::vec4(1);
 
 
         glm::vec4 camPos_Local_lowP = glm::inverse(lowpmodel) * glm::vec4(camPos,1);
-        camPos_Local /= camPos_Local.w;
-        camPos_Local.w = 0;
+        camPos_Local_lowP /= camPos_Local_lowP.w;
+        camPos_Local_lowP.w = 0;
 
         glm::ivec2 pixel(0,0);
         for(pixel.y = 0; pixel.y < renderTargetSizeY; ++pixel.y) {
@@ -294,20 +255,28 @@ glm::vec4 minusOne = glm::vec4(1);
             glm::vec4 curXLooplowp(curYLooplowp);
             for(pixel.x = 0; pixel.x < renderTargetSizeX; ++pixel.x) {
 
+
                 
                 RaycastReport<Voxel> b = raycast_beamOpt(camPos_Local_lowP, glm::normalize(curXLoop), getCurVol_LowLOD(), volToRender, glm::normalize(curXLooplowp), scaleLowptoHighp);
                 //RaycastReport<Voxel> b = raycast_naiive_vec4(camPos_Local, glm::normalize(curXLoop), volToRender);
                 if(b.found) {
-                    screenTex->data_stream[pixel.x + pixel.y*renderTargetSizeX] = glm::u8vec4(255,b.dataAt.rgba.r,b.dataAt.rgba.g,b.dataAt.rgba.b);
+                    
+                    glm::vec4 sunDir = glm::normalize(glm::vec4(1,1,1,0));
+                    glm::vec4 norm = glm::vec4(b.dataAt.norm) / 255.f;
+
+                    float lighting = glm::clamp(glm::dot(sunDir, norm) / 2.f + 0.5f, 0.f, 1.f);
+
+                    screenTex->data_stream[pixel.x + pixel.y*renderTargetSizeX] = glm::u8vec4(255,b.dataAt.rgba.r*lighting,b.dataAt.rgba.g*lighting,b.dataAt.rgba.b*lighting);
                 } else {
                     screenTex->data_stream[pixel.x + pixel.y*renderTargetSizeX] = glm::u8vec4(255,0,0,0);
                 }
-                
-                //glm::vec4 rayTraceColor = glm::clamp(raytrace_naiive(iterationNumber, camPos_Local, glm::normalize(curXLoop), volToRender),glm::vec4(0),glm::vec4(1));
+                /*
+                glm::vec4 rayTraceColor = glm::clamp(raytrace_naiive(iterationNumber, camPos_Local, glm::normalize(curXLoop), volToRender),glm::vec4(0),glm::vec4(1));
 
-                //glm::u8vec4 colorVec(255, glm::vec3(rayTraceColor)*255.f);
+                glm::u8vec4 colorVec(255, glm::vec3(rayTraceColor)*255.f);
 
-                //screenTex->data_stream[pixel.x + pixel.y*renderTargetSizeX] = colorVec;
+                screenTex->data_stream[pixel.x + pixel.y*renderTargetSizeX] = colorVec;
+                */
 
 
                 curXLoop += xdiff;
@@ -394,24 +363,25 @@ glm::vec4 minusOne = glm::vec4(1);
 
 
 // Only load one of the models, because that takes time!
-#define FASTLOAD
+// #define FASTLOAD
 
     
     void State::initAllVolumes() {
         // what a glorious collection!
         
 #ifndef FASTLOAD
-        volumes.push_back(new Vol_LOD_Set("icosahedron")); // 0
-        volumes.push_back(new Vol_LOD_Set("teapot"));      // 1
+        //volumes.push_back(new Vol_LOD_Set("icosahedron")); // 0
+        //volumes.push_back(new Vol_LOD_Set("teapot"));      // 1
 #endif
         volumes.push_back(new Vol_LOD_Set("galleon"));     // 2
 #ifndef FASTLOAD
-        volumes.push_back(new Vol_LOD_Set("dragon"));      // 3
-        volumes.push_back(new Vol_LOD_Set("footbones"));   // 4
-        volumes.push_back(new Vol_LOD_Set("sandal"));      // 5
-        volumes.push_back(new Vol_LOD_Set("stratocaster"));// 6
-        volumes.push_back(new Vol_LOD_Set("walkman"));     // 7
-        volumes.push_back(new Vol_LOD_Set("dolphins"));    // 8
+        //volumes.push_back(new Vol_LOD_Set("dragon"));      // 3
+        //volumes.push_back(new Vol_LOD_Set("footbones"));   // 4
+        //volumes.push_back(new Vol_LOD_Set("sandal"));      // 5
+        //volumes.push_back(new Vol_LOD_Set("stratocaster"));// 6
+        //volumes.push_back(new Vol_LOD_Set("walkman"));     // 7
+        //volumes.push_back(new Vol_LOD_Set("dolphins"));    // 8
+        //volumes.push_back(new Vol_LOD_Set("cube")); // 0
 #endif
 
     }
